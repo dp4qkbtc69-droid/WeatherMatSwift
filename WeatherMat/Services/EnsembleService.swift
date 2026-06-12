@@ -38,12 +38,15 @@ final class EnsembleService: Sendable {
         async let warnings = (try? await withTimeout(seconds: 6) {
             try await BrightSkyService.shared.fetchWarnings(for: location)
         }) ?? []
+        async let airQuality = try? await withTimeout(seconds: 6) {
+            try await AirQualityService.shared.fetch(for: location)
+        }
 
-        return combine(results: results, location: location, warnings: await warnings)
+        return combine(results: results, location: location, warnings: await warnings, airQuality: await airQuality)
     }
 
     // MARK: - Ensemble combination
-    private func combine(results: [ModelWeatherData], location: CLLocation, warnings: [DWDWarning]) -> EnsembleWeatherData {
+    private func combine(results: [ModelWeatherData], location: CLLocation, warnings: [DWDWarning], airQuality: AirQuality?) -> EnsembleWeatherData {
         guard !results.isEmpty else { return .empty }
 
         let names   = results.map(\.modelName)
@@ -100,6 +103,7 @@ final class EnsembleService: Sendable {
             uvIndex:       wa(\.currentUVIndex),
             isDay:         currentIsDay,
             precipitation: wa(\.currentPrecipitation),
+            airQuality:    airQuality,
             condition:     cond,
             background:    currentIsDay ? cond.background : .nightClear
         )
@@ -358,11 +362,13 @@ final class EnsembleService: Sendable {
         let slots = minutely
             .filter { $0.time >= now.addingTimeInterval(-900) }
             .sorted { $0.time < $1.time }
+        let chart = rainChart(from: slots, now: now)
 
         guard !slots.isEmpty else {
             return .init(type: .clear, text: "Kein Regen erwartet", sub: "",
                          sfSymbol: "sun.max.fill", confidence: confidence,
-                         minutesUntilRain: nil, minutesUntilClear: nil)
+                         minutesUntilRain: nil, minutesUntilClear: nil,
+                         chart: chart)
         }
         // Currently raining?
         let currentIndex = slots.lastIndex { $0.time <= now }
@@ -376,7 +382,8 @@ final class EnsembleService: Sendable {
                 : "\(Int(cur.precipProbability))% Wahrscheinlichkeit"
             return .init(type: .now, text: "Regnet gerade\(sfx)", sub: sub,
                          sfSymbol: "cloud.rain.fill", confidence: confidence,
-                         minutesUntilRain: 0, minutesUntilClear: nil)
+                         minutesUntilRain: 0, minutesUntilClear: nil,
+                         chart: chart)
         }
         // Upcoming rain
         for (index, slot) in slots.enumerated()
@@ -387,7 +394,8 @@ final class EnsembleService: Sendable {
             return .init(type: .soon, text: "Regen in \(mins) Minuten\(sfx)",
                          sub: "\(Int(slot.precipProbability))% Wahrscheinlichkeit",
                          sfSymbol: "cloud.drizzle.fill", confidence: confidence,
-                         minutesUntilRain: mins, minutesUntilClear: nil)
+                         minutesUntilRain: mins, minutesUntilClear: nil,
+                         chart: chart)
         }
         // Rain stopping
         if let stopIdx = slots.indices.first(where: {
@@ -397,12 +405,28 @@ final class EnsembleService: Sendable {
             if mins > 0 && mins < 120 {
                 return .init(type: .clear, text: "Regen hört in \(mins) min auf\(sfx)", sub: "",
                              sfSymbol: "cloud.sun.fill", confidence: confidence,
-                             minutesUntilRain: nil, minutesUntilClear: mins)
+                             minutesUntilRain: nil, minutesUntilClear: mins,
+                             chart: chart)
             }
         }
         return .init(type: .clear, text: "Kein Regen in den nächsten 2 Stunden", sub: "",
                      sfSymbol: "sun.max.fill", confidence: confidence,
-                     minutesUntilRain: nil, minutesUntilClear: nil)
+                     minutesUntilRain: nil, minutesUntilClear: nil,
+                     chart: chart)
+    }
+
+    private func rainChart(from slots: [ModelMinutelyPoint], now: Date) -> [RainChartPoint] {
+        slots.indices.compactMap { index in
+            let slot = slots[index]
+            guard slot.time >= now,
+                  slot.time <= now.addingTimeInterval(2 * 3_600)
+            else { return nil }
+            return RainChartPoint(
+                time: slot.time,
+                precipitationRate: precipRateMmPerHour(in: slots, at: index),
+                probability: slot.precipProbability
+            )
+        }
     }
 
     private func precipRateMmPerHour(in slots: [ModelMinutelyPoint], at index: Int) -> Double {
@@ -427,19 +451,60 @@ final class EnsembleService: Sendable {
     }
 }
 
+// MARK: - Air quality
+final class AirQualityService: Sendable {
+    static let shared = AirQualityService()
+    private init() {}
+
+    func fetch(for location: CLLocation) async throws -> AirQuality {
+        var c = URLComponents(string: "https://air-quality-api.open-meteo.com/v1/air-quality")!
+        c.queryItems = [
+            .init(name: "latitude", value: "\(location.coordinate.latitude)"),
+            .init(name: "longitude", value: "\(location.coordinate.longitude)"),
+            .init(name: "current", value: "european_aqi,pm10,pm2_5,nitrogen_dioxide,ozone"),
+            .init(name: "timezone", value: "auto")
+        ]
+
+        let (data, response) = try await URLSession.shared.data(from: c.url!)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw WeatherError.notAvailable }
+        let decoded = try JSONDecoder().decode(AirQualityResponse.self, from: data)
+        let current = decoded.current
+        guard let europeanAQI = current.european_aqi else { throw WeatherError.notAvailable }
+        return AirQuality(
+            europeanAQI: Int(europeanAQI.rounded()),
+            pm10: current.pm10 ?? 0,
+            pm25: current.pm2_5 ?? 0,
+            nitrogenDioxide: current.nitrogen_dioxide ?? 0,
+            ozone: current.ozone ?? 0
+        )
+    }
+}
+
+private struct AirQualityResponse: Decodable {
+    let current: Current
+
+    struct Current: Decodable {
+        let european_aqi: Double?
+        let pm10: Double?
+        let pm2_5: Double?
+        let nitrogen_dioxide: Double?
+        let ozone: Double?
+    }
+}
+
 // MARK: - EnsembleWeatherData empty state
 extension EnsembleWeatherData {
     static let empty = EnsembleWeatherData(
         current: CurrentWeather(
             temp: 0, feelsLike: 0, humidity: 0, cloudCover: 0, windSpeed: 0, windDirection: 0,
-            pressure: 0, visibility: 0, uvIndex: 0, isDay: true, precipitation: 0,
+            pressure: 0, visibility: 0, uvIndex: 0, isDay: true, precipitation: 0, airQuality: nil,
             condition: WMOCode.condition(for: 0), background: .sunny),
         today: DailyEntry(date: Date(), condition: WMOCode.condition(for: 0),
                           high: 0, low: 0, precipitationProbability: 0, precipitationSum: 0,
                           sunrise: Date(), sunset: Date(), uvMax: 0, windMax: 0, sunshineDuration: 0),
         hourly: [], daily: [],
         rain: RainAnalysis(type: .clear, text: "", sub: "", sfSymbol: "sun.max.fill",
-                           confidence: .medium, minutesUntilRain: nil, minutesUntilClear: nil),
+                           confidence: .medium, minutesUntilRain: nil, minutesUntilClear: nil, chart: []),
         warnings: [], agreementPct: 0, confidence: .medium, activeModels: []
     )
 }

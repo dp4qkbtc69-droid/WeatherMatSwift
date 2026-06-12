@@ -15,8 +15,29 @@ struct CurrentWeather: Codable {
     let uvIndex:        Double
     let isDay:          Bool
     let precipitation:  Double
+    let airQuality:     AirQuality?
     let condition:      WMOCondition
     let background:     WeatherBackground
+}
+
+// MARK: - Air Quality
+struct AirQuality: Codable {
+    let europeanAQI:     Int
+    let pm10:            Double
+    let pm25:            Double
+    let nitrogenDioxide: Double
+    let ozone:           Double
+
+    var label: String {
+        switch europeanAQI {
+        case 0..<20:    return "Gut"
+        case 20..<40:   return "Okay"
+        case 40..<60:   return "Mäßig"
+        case 60..<80:   return "Schlecht"
+        case 80..<100:  return "Sehr schlecht"
+        default:        return "Extrem"
+        }
+    }
 }
 
 // MARK: - Hourly Entry
@@ -58,6 +79,14 @@ struct RainAnalysis: Codable {
     let confidence:         ConfidenceLevel
     let minutesUntilRain:   Int?
     let minutesUntilClear:  Int?
+    let chart:              [RainChartPoint]
+}
+
+struct RainChartPoint: Identifiable, Codable {
+    var id: Date { time }
+    let time:              Date
+    let precipitationRate: Double
+    let probability:       Double
 }
 
 // MARK: - Confidence

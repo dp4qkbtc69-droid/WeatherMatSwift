@@ -50,6 +50,13 @@ struct StatsView: View {
                         StatTileView(icon: "eye.fill",         label: "Sichtweite",       value: "\(current.visibility) km")
                         StatTileView(icon: "cloud.fill",       label: "Bewölkung",        value: "\(current.cloudCover)%")
                         StatTileView(icon: "drop.fill",        label: "Niederschlag",     value: precipLabel)
+                        if let airQuality = current.airQuality {
+                            StatTileView(icon: "aqi.medium",    label: "Luftqualität",     value: "AQI \(airQuality.europeanAQI) (\(airQuality.label))")
+                            StatTileView(icon: "sparkles",      label: "Feinstaub",        value: String(format: "PM2.5 %.0f µg/m³", airQuality.pm25))
+                            StatTileView(icon: "smoke.fill",    label: "PM10",             value: String(format: "%.0f µg/m³", airQuality.pm10))
+                            StatTileView(icon: "circle.hexagongrid.fill", label: "Ozon / NO₂",
+                                         value: String(format: "%.0f / %.0f µg/m³", airQuality.ozone, airQuality.nitrogenDioxide))
+                        }
                     }
                     // Daily values — always shown (today: forecast max; other days: forecast)
                     StatTileView(icon: "sun.max.fill",         label: "UV-Index\(isToday ? "" : " (max)")",
@@ -80,6 +87,9 @@ struct StatsView: View {
         }
         if isToday {
             parts.append("\(current.humidity)% Feuchte")
+            if let airQuality = current.airQuality {
+                parts.append("AQI \(airQuality.europeanAQI)")
+            }
         } else {
             parts.append("\(selectedDay.precipitationProbability)% Regen")
         }

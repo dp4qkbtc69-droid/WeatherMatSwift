@@ -10,6 +10,7 @@ struct LocationsView: View {
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>? = nil
     @State private var searchID = UUID()
+    @State private var isReordering = false
 
     var body: some View {
         NavigationStack {
@@ -22,15 +23,21 @@ struct LocationsView: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    SearchBar(text: $searchText)
-                        .padding(.horizontal)
-                        .padding(.top, 8)
-                        .padding(.bottom, 14)
-                        .onChange(of: searchText) { _, newVal in
-                            scheduleSearch(newVal)
-                        }
+                    if isReordering {
+                        reorderList
+                    } else {
+                        SearchBar(text: $searchText)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                            .padding(.bottom, 14)
+                            .onChange(of: searchText) { _, newVal in
+                                scheduleSearch(newVal)
+                            }
+                    }
 
-                    if isSearching {
+                    if isReordering {
+                        EmptyView()
+                    } else if isSearching {
                         ProgressView()
                             .tint(.white)
                             .padding(.top, 40)
@@ -64,7 +71,7 @@ struct LocationsView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Fertig") { dismiss() }
+                    Button("Schließen") { dismiss() }
                         .foregroundStyle(.white)
                 }
                 ToolbarItem(placement: .topBarLeading) {
@@ -78,9 +85,56 @@ struct LocationsView: View {
                         }
                         .foregroundStyle(.cyan)
                     }
+                    .disabled(isReordering)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if vm.savedLocations.count > 1 {
+                        Button(isReordering ? "Fertig" : "Sortieren") {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isReordering.toggle()
+                                searchText = ""
+                                results = []
+                                isSearching = false
+                                searchTask?.cancel()
+                            }
+                        }
+                        .foregroundStyle(.white)
+                    }
                 }
             }
         }
+    }
+
+    private var reorderList: some View {
+        List {
+            ForEach(vm.savedLocations) { loc in
+                HStack(spacing: 12) {
+                    Image(systemName: loc.isGPS ? "location.fill" : "mappin.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(loc.id == vm.activeLocation?.id ? .cyan : .white.opacity(0.58))
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(loc.name)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                        if !loc.subtitle.isEmpty {
+                            Text(loc.subtitle)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white.opacity(0.62))
+                        }
+                    }
+                    Spacer()
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+            }
+            .onMove { source, destination in
+                vm.moveLocations(from: source, to: destination)
+            }
+        }
+        .environment(\.editMode, .constant(.active))
+        .scrollContentBackground(.hidden)
+        .listStyle(.plain)
     }
 
     // MARK: - Main scroll content (locations + settings)

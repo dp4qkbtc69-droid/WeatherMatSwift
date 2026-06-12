@@ -69,7 +69,7 @@ extension DailyEntry {
 extension CurrentWeather {
     enum CodingKeys: String, CodingKey {
         case temp, feelsLike, humidity, cloudCover, windSpeed, windDirection
-        case pressure, visibility, uvIndex, isDay, precipitation, condition, background
+        case pressure, visibility, uvIndex, isDay, precipitation, airQuality, condition, background
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -84,6 +84,7 @@ extension CurrentWeather {
         uvIndex       = try  c.decode(Double.self,            forKey: .uvIndex)
         isDay         = try  c.decode(Bool.self,              forKey: .isDay)
         precipitation = try  c.decode(Double.self,            forKey: .precipitation)
+        airQuality    = try  c.decodeIfPresent(AirQuality.self, forKey: .airQuality)
         condition     = try  c.decode(WMOCondition.self,       forKey: .condition)
         background    = try  c.decode(WeatherBackground.self,  forKey: .background)
     }
@@ -100,8 +101,38 @@ extension CurrentWeather {
         try c.encode(uvIndex,       forKey: .uvIndex)
         try c.encode(isDay,         forKey: .isDay)
         try c.encode(precipitation, forKey: .precipitation)
+        try c.encodeIfPresent(airQuality, forKey: .airQuality)
         try c.encode(condition,     forKey: .condition)
         try c.encode(background,    forKey: .background)
+    }
+}
+
+// MARK: - RainAnalysis
+extension RainAnalysis {
+    enum CodingKeys: String, CodingKey {
+        case type, text, sub, sfSymbol, confidence, minutesUntilRain, minutesUntilClear, chart
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type              = try c.decode(RainType.self,          forKey: .type)
+        text              = try c.decode(String.self,            forKey: .text)
+        sub               = try c.decode(String.self,            forKey: .sub)
+        sfSymbol          = try c.decode(String.self,            forKey: .sfSymbol)
+        confidence        = try c.decode(ConfidenceLevel.self,   forKey: .confidence)
+        minutesUntilRain  = try c.decodeIfPresent(Int.self,      forKey: .minutesUntilRain)
+        minutesUntilClear = try c.decodeIfPresent(Int.self,      forKey: .minutesUntilClear)
+        chart             = try c.decodeIfPresent([RainChartPoint].self, forKey: .chart) ?? []
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type,              forKey: .type)
+        try c.encode(text,              forKey: .text)
+        try c.encode(sub,               forKey: .sub)
+        try c.encode(sfSymbol,          forKey: .sfSymbol)
+        try c.encode(confidence,        forKey: .confidence)
+        try c.encodeIfPresent(minutesUntilRain,  forKey: .minutesUntilRain)
+        try c.encodeIfPresent(minutesUntilClear, forKey: .minutesUntilClear)
+        try c.encode(chart,             forKey: .chart)
     }
 }
 

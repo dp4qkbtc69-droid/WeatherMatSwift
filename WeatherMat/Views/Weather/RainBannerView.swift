@@ -10,26 +10,32 @@ struct RainBannerView: View {
     }
 
     private var banner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: rain.sfSymbol)
-                .symbolRenderingMode(.multicolor)
-                .font(.system(size: 26))
-                .symbolEffect(.pulse.byLayer, options: .repeating, isActive: rain.type == .now)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: rain.sfSymbol)
+                    .symbolRenderingMode(.multicolor)
+                    .font(.system(size: 26))
+                    .symbolEffect(.pulse.byLayer, options: .repeating, isActive: rain.type == .now)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(rain.text)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                if !rain.sub.isEmpty {
-                    Text(rain.sub)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.76))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rain.text)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    if !rain.sub.isEmpty {
+                        Text(rain.sub)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.76))
+                    }
                 }
+
+                Spacer()
+
+                ConfidenceDot(level: rain.confidence)
             }
 
-            Spacer()
-
-            ConfidenceDot(level: rain.confidence)
+            if !rain.chart.isEmpty {
+                RainMiniChartView(points: rain.chart)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -37,6 +43,58 @@ struct RainBannerView: View {
         .background(.white.opacity(0.11))
         .background(.ultraThinMaterial.opacity(0.54))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct RainMiniChartView: View {
+    let points: [RainChartPoint]
+
+    private var sampledPoints: [RainChartPoint] {
+        guard points.count > 18 else { return points }
+        let stride = max(1, Int(ceil(Double(points.count) / 18.0)))
+        return points.enumerated().compactMap { index, point in
+            index % stride == 0 ? point : nil
+        }
+    }
+
+    private var maxRate: Double {
+        max(0.4, sampledPoints.map(\.precipitationRate).max() ?? 0)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Niederschlag nächste 2 h")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+                Spacer()
+                Text(maxRate < 1 ? "<1 mm/h" : String(format: "%.1f mm/h", maxRate))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.52))
+            }
+
+            HStack(alignment: .bottom, spacing: 3) {
+                ForEach(sampledPoints) { point in
+                    Capsule()
+                        .fill(barColor(for: point))
+                        .frame(height: max(4, min(32, point.precipitationRate / maxRate * 32)))
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel(chartLabel(for: point))
+                }
+            }
+            .frame(height: 34, alignment: .bottom)
+        }
+    }
+
+    private func barColor(for point: RainChartPoint) -> Color {
+        point.precipitationRate > 0.2
+            ? Color(hex: "#9ee8ff")
+            : Color.white.opacity(point.probability > 50 ? 0.5 : 0.22)
+    }
+
+    private func chartLabel(for point: RainChartPoint) -> String {
+        let time = point.time.formatted(.dateTime.hour().minute())
+        return String(format: "%@ %.1f mm/h, %.0f %%", time, point.precipitationRate, point.probability)
     }
 }
 

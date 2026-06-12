@@ -175,6 +175,7 @@ final class WeatherViewModel {
     @MainActor
     func addLocation(_ loc: SavedLocation) {
         savedLocations.append(loc)
+        normalizeLocationSortOrder()
         activeLocationIndex = savedLocations.count - 1
         selectedDayIndex    = nil
         saveLocations()
@@ -192,9 +193,31 @@ final class WeatherViewModel {
         savedLocations.remove(at: index)
         activeLocationIndex = min(activeLocationIndex, max(0, savedLocations.count - 1))
         selectedDayIndex    = nil
+        normalizeLocationSortOrder()
         saveLocations()
         saveActiveLocationIndex()
         if let loc = activeLocation { Task { await loadWeather(for: loc) } }
+    }
+
+    @MainActor
+    func moveLocations(from source: IndexSet, to destination: Int) {
+        let activeID = activeLocation?.id
+        var reordered = savedLocations
+        let moving = source.sorted().map { reordered[$0] }
+        for index in source.sorted(by: >) {
+            reordered.remove(at: index)
+        }
+        let adjustedDestination = destination - source.filter { $0 < destination }.count
+        reordered.insert(contentsOf: moving, at: adjustedDestination)
+        savedLocations = reordered
+        normalizeLocationSortOrder()
+        if let activeID, let newIndex = savedLocations.firstIndex(where: { $0.id == activeID }) {
+            activeLocationIndex = newIndex
+        } else {
+            activeLocationIndex = min(activeLocationIndex, max(0, savedLocations.count - 1))
+        }
+        saveLocations()
+        saveActiveLocationIndex()
     }
 
     @MainActor
@@ -294,6 +317,12 @@ final class WeatherViewModel {
     func saveLocations() {
         if let data = try? JSONEncoder().encode(savedLocations) {
             UserDefaults.standard.set(data, forKey: udKey)
+        }
+    }
+
+    private func normalizeLocationSortOrder() {
+        for i in savedLocations.indices {
+            savedLocations[i].sortOrder = i
         }
     }
 
