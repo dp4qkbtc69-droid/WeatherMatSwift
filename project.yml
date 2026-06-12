@@ -1,0 +1,98 @@
+name: WeatherMat
+options:
+  bundleIdPrefix: de.praxishartlep
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+
+schemes:
+  WeatherMat:
+    build:
+      targets:
+        WeatherMat: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WeatherMatTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: "5P532N3MK4"
+
+targets:
+
+  # ── Main App ──────────────────────────────────────────────────────────────
+  WeatherMat:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WeatherMat
+        excludes:
+          - "**/*.md"
+          - "Shared/**"
+    info:
+      path: WeatherMat/Info.plist
+      properties:
+        CFBundleDisplayName: WeatherMat
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: "WeatherMat benötigt deinen Standort für lokale Wetterdaten."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "WeatherMat benötigt deinen Standort für lokale Wetterdaten."
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes:
+          - fetch
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        BGTaskSchedulerPermittedIdentifiers:
+          - de.praxishartlep.weathermat.refresh
+    entitlements:
+      path: WeatherMat/WeatherMat.entitlements
+      properties:
+        com.apple.developer.weatherkit: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.praxishartlep.weathermat
+        INFOPLIST_FILE: WeatherMat/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WeatherMat/WeatherMat.entitlements
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+    dependencies:
+      - sdk: WeatherKit.framework
+      - sdk: CoreLocation.framework
+      - sdk: MapKit.framework
+      - sdk: BackgroundTasks.framework
+
+  WeatherMatTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WeatherMatTests
+    dependencies:
+      - target: WeatherMat
+      - sdk: XCTest.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.praxishartlep.weathermatTests
+        GENERATE_INFOPLIST_FILE: YES

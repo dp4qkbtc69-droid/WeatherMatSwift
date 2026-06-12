@@ -1,0 +1,5 @@
+WeatherMat/LocalConfig.plist
+.DS_Store
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
