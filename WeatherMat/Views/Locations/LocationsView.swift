@@ -9,6 +9,7 @@ struct LocationsView: View {
     @State private var results:    [GeocodedLocation] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>? = nil
+    @State private var searchID = UUID()
 
     var body: some View {
         NavigationStack {
@@ -181,17 +182,21 @@ struct LocationsView: View {
     // MARK: - Actions
     private func scheduleSearch(_ query: String) {
         searchTask?.cancel()
+        let id = UUID()
+        searchID = id
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-            results = []; return
+            isSearching = false
+            results = []
+            return
         }
         searchTask = Task {
             try? await Task.sleep(nanoseconds: 400_000_000) // 400 ms debounce
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, searchID == id else { return }
             isSearching = true
-            defer { isSearching = false }
             let found = await GeocodingService.shared.search(query)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, searchID == id else { return }
             results = found
+            isSearching = false
         }
     }
 

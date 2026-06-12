@@ -16,6 +16,8 @@ final class GeocodingService: Sendable {
 
     static let shared = GeocodingService()
     private let owmKey: String?
+    private let reverseCacheKey = "reverseGeocodeCache_v2"
+    private let reverseCacheLimit = 200
 
     private init() {
         owmKey = Self.loadOWMKey()
@@ -43,29 +45,67 @@ final class GeocodingService: Sendable {
     func reverseGeocode(_ location: CLLocation) async -> String {
         let lat = location.coordinate.latitude
         let lon = location.coordinate.longitude
-        let cacheKey = reverseCacheKey(lat: lat, lon: lon)
-        if let cached = UserDefaults.standard.string(forKey: cacheKey) {
+        let key = reverseCoordinateKey(lat: lat, lon: lon)
+        if let cached = cachedReverseName(for: key) {
             return cached
         }
 
         if let name = try? await owmReverse(lat: lat, lon: lon) {
-            UserDefaults.standard.set(name, forKey: cacheKey)
+            cacheReverseName(name, for: key)
             return name
         }
         if let name = try? await nominatim(lat: lat, lon: lon) {
-            UserDefaults.standard.set(name, forKey: cacheKey)
+            cacheReverseName(name, for: key)
             return name
         }
 
         let fallback = String(format: "%.2f°, %.2f°", lat, lon)
-        UserDefaults.standard.set(fallback, forKey: cacheKey)
+        cacheReverseName(fallback, for: key)
         return fallback
     }
 
-    private func reverseCacheKey(lat: Double, lon: Double) -> String {
+    private func reverseCoordinateKey(lat: Double, lon: Double) -> String {
         let roundedLat = (lat * 1_000).rounded() / 1_000
         let roundedLon = (lon * 1_000).rounded() / 1_000
-        return String(format: "reverseGeocode_v1_%.3f_%.3f", roundedLat, roundedLon)
+        return String(format: "%.3f,%.3f", roundedLat, roundedLon)
+    }
+
+    private func cachedReverseName(for key: String) -> String? {
+        var cache = loadReverseCache()
+        guard var entry = cache[key] else { return nil }
+        entry.lastUsed = Date()
+        cache[key] = entry
+        saveReverseCache(cache)
+        return entry.name
+    }
+
+    private func cacheReverseName(_ name: String, for key: String) {
+        var cache = loadReverseCache()
+        cache[key] = ReverseGeocodeCacheEntry(name: name, lastUsed: Date())
+        if cache.count > reverseCacheLimit {
+            let overflow = cache.count - reverseCacheLimit
+            let staleKeys = cache
+                .sorted { $0.value.lastUsed < $1.value.lastUsed }
+                .prefix(overflow)
+                .map(\.key)
+            for staleKey in staleKeys {
+                cache.removeValue(forKey: staleKey)
+            }
+        }
+        saveReverseCache(cache)
+    }
+
+    private func loadReverseCache() -> [String: ReverseGeocodeCacheEntry] {
+        guard let data = UserDefaults.standard.data(forKey: reverseCacheKey),
+              let cache = try? JSONDecoder().decode([String: ReverseGeocodeCacheEntry].self, from: data)
+        else { return [:] }
+        return cache
+    }
+
+    private func saveReverseCache(_ cache: [String: ReverseGeocodeCacheEntry]) {
+        if let data = try? JSONEncoder().encode(cache) {
+            UserDefaults.standard.set(data, forKey: reverseCacheKey)
+        }
     }
 
     // MARK: - OWM geocoding
@@ -115,4 +155,8 @@ private struct OWMItem: Decodable { let name: String; let country,state: String?
 private struct OMGeo:  Decodable { let name,country_code,admin1: String?; let latitude,longitude: Double }
 private struct LocalConfig: Decodable {
     let openWeatherMapGeocodingAPIKey: String
+}
+private struct ReverseGeocodeCacheEntry: Codable {
+    let name: String
+    var lastUsed: Date
 }
