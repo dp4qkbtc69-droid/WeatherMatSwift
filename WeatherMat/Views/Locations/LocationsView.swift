@@ -127,6 +127,7 @@ struct LocationsView: View {
                     Spacer()
                 }
                 .listRowBackground(Color.white.opacity(0.08))
+                .moveDisabled(loc.isGPS)
             }
             .onMove { source, destination in
                 vm.moveLocations(from: source, to: destination)

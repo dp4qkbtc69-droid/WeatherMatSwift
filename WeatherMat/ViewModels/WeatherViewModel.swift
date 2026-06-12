@@ -202,6 +202,7 @@ final class WeatherViewModel {
     @MainActor
     func moveLocations(from source: IndexSet, to destination: Int) {
         let activeID = activeLocation?.id
+        guard !source.contains(where: { savedLocations[safe: $0]?.isGPS == true }) else { return }
         var reordered = savedLocations
         let moving = source.sorted().map { reordered[$0] }
         for index in source.sorted(by: >) {
@@ -209,6 +210,10 @@ final class WeatherViewModel {
         }
         let adjustedDestination = destination - source.filter { $0 < destination }.count
         reordered.insert(contentsOf: moving, at: adjustedDestination)
+        if let gpsIndex = reordered.firstIndex(where: { $0.isGPS }) {
+            let gpsLocation = reordered.remove(at: gpsIndex)
+            reordered.insert(gpsLocation, at: 0)
+        }
         savedLocations = reordered
         normalizeLocationSortOrder()
         if let activeID, let newIndex = savedLocations.firstIndex(where: { $0.id == activeID }) {
@@ -258,8 +263,9 @@ final class WeatherViewModel {
         // Recent fix available — just refresh weather for it, no GPS hardware
         if let last = lastGPSFix,
            Date().timeIntervalSince(last) < gpsCooldown,
-           let gpsLoc = savedLocations.first, gpsLoc.isGPS {
-            activeLocationIndex = 0
+           let gpsIndex = savedLocations.firstIndex(where: { $0.isGPS }) {
+            let gpsLoc = savedLocations[gpsIndex]
+            activeLocationIndex = gpsIndex
             saveActiveLocationIndex()
             await loadWeather(for: gpsLoc)
             return
@@ -276,7 +282,9 @@ final class WeatherViewModel {
             let name = await geocoding.reverseGeocode(clLoc)
 
             // Clean up old GPS cache entry before replacing with new UUID
-            if let oldGPS = savedLocations.first, oldGPS.isGPS {
+            let oldGPSIndex = savedLocations.firstIndex(where: { $0.isGPS })
+            if let oldGPSIndex {
+                let oldGPS = savedLocations[oldGPSIndex]
                 UserDefaults.standard.removeObject(forKey: cacheKey(for: oldGPS))
                 lastRefreshByLocation.removeValue(forKey: oldGPS.id)
             }
@@ -288,8 +296,9 @@ final class WeatherViewModel {
                 sortOrder: 0,
                 isGPS:     true
             )
-            if savedLocations.first?.isGPS == true {
-                savedLocations[0] = saved
+            if let oldGPSIndex {
+                savedLocations.remove(at: oldGPSIndex)
+                savedLocations.insert(saved, at: 0)
             } else {
                 savedLocations.insert(saved, at: 0)
             }

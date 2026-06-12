@@ -5,20 +5,42 @@ struct RainBannerView: View {
     let rain: RainAnalysis
 
     var body: some View {
-        if rain.type == .clear { EmptyView() }
-        else { banner }
+        if shouldShowBanner { banner }
+        else { EmptyView() }
+    }
+
+    private var shouldShowBanner: Bool {
+        rain.type != .clear ||
+        rain.minutesUntilClear != nil ||
+        hasChartSignal
+    }
+
+    private var hasChartSignal: Bool {
+        rain.chart.contains { $0.precipitationRate > 0.05 || $0.probability > 50 }
+    }
+
+    private var showsOnlyChartSignal: Bool {
+        rain.type == .clear && rain.minutesUntilClear == nil && hasChartSignal
+    }
+
+    private var displayText: String {
+        showsOnlyChartSignal ? "Regen möglich" : rain.text
+    }
+
+    private var displaySymbol: String {
+        showsOnlyChartSignal ? "cloud.drizzle.fill" : rain.sfSymbol
     }
 
     private var banner: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Image(systemName: rain.sfSymbol)
+                Image(systemName: displaySymbol)
                     .symbolRenderingMode(.multicolor)
                     .font(.system(size: 26))
                     .symbolEffect(.pulse.byLayer, options: .repeating, isActive: rain.type == .now)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(rain.text)
+                    Text(displayText)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
                     if !rain.sub.isEmpty {
@@ -58,17 +80,36 @@ private struct RainMiniChartView: View {
     }
 
     private var maxRate: Double {
-        max(0.4, sampledPoints.map(\.precipitationRate).max() ?? 0)
+        max(0.4, actualMaxRate)
+    }
+
+    private var actualMaxRate: Double {
+        sampledPoints.map(\.precipitationRate).max() ?? 0
+    }
+
+    private var horizonLabel: String {
+        guard let first = points.first?.time,
+              let last = points.last?.time
+        else { return "Niederschlag" }
+        let minutes = max(1, Int(last.timeIntervalSince(first) / 60))
+        return minutes < 90
+            ? "Niederschlag nächste \(minutes) min"
+            : "Niederschlag nächste \(Int((Double(minutes) / 60).rounded())) h"
+    }
+
+    private var maxRateLabel: String {
+        guard actualMaxRate > 0 else { return "0 mm/h" }
+        return actualMaxRate < 1 ? "<1 mm/h" : String(format: "%.1f mm/h", actualMaxRate)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Niederschlag nächste 2 h")
+                Text(horizonLabel)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.68))
                 Spacer()
-                Text(maxRate < 1 ? "<1 mm/h" : String(format: "%.1f mm/h", maxRate))
+                Text(maxRateLabel)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.52))
             }
