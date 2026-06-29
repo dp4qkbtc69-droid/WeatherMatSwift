@@ -238,7 +238,7 @@ struct RainRadarScreen: View {
         .task(id: viewModel.isPlaying) {
             guard viewModel.isPlaying else { return }
             while viewModel.isPlaying {
-                try? await Task.sleep(nanoseconds: 950_000_000)
+                try? await Task.sleep(nanoseconds: 620_000_000)
                 guard !Task.isCancelled else { return }
                 viewModel.advanceFrame()
             }
@@ -432,18 +432,13 @@ private struct RadarMapRepresentable: UIViewRepresentable {
         if let host, let frame {
             let layerID = "\(host)\(frame.path)"
             if context.coordinator.currentLayerID != layerID {
-                if let overlay = context.coordinator.radarOverlay {
-                    mapView.removeOverlay(overlay)
-                }
                 let overlay: MKTileOverlay = source == .dwd
                     ? DwdRadarTileOverlay(host: host, framePath: frame.path, sourceMaxZoom: tileMaxZoom ?? 8)
                     : ClampedRainTileOverlay(host: host, framePath: frame.path)
                 overlay.canReplaceMapContent = false
                 overlay.minimumZ = 3
                 overlay.maximumZ = 22
-                context.coordinator.radarOverlay = overlay
-                context.coordinator.currentLayerID = layerID
-                mapView.addOverlay(overlay, level: .aboveLabels)
+                context.coordinator.addRadarOverlay(overlay, id: layerID, to: mapView)
             }
         }
 
@@ -471,15 +466,79 @@ private struct RadarMapRepresentable: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
-        var radarOverlay: MKTileOverlay?
+        private let radarTargetAlpha: CGFloat = 0.82
+        private var radarOverlays: [(id: String, overlay: MKTileOverlay)] = []
+        private var radarOverlayAlphas: [ObjectIdentifier: CGFloat] = [:]
+        private var radarRenderers: [ObjectIdentifier: MKTileOverlayRenderer] = [:]
         var dwdOverlays: [String: MKTileOverlay] = [:]
         var currentLayerID: String?
         var lastAppliedRegionRevision = 0
 
+        func addRadarOverlay(_ overlay: MKTileOverlay, id: String, to mapView: MKMapView) {
+            currentLayerID = id
+            radarOverlays.append((id: id, overlay: overlay))
+
+            let overlayID = ObjectIdentifier(overlay)
+            radarOverlayAlphas[overlayID] = radarOverlays.count == 1 ? radarTargetAlpha : 0
+            mapView.addOverlay(overlay, level: .aboveLabels)
+
+            animateRadarOverlay(overlay, to: radarTargetAlpha, in: mapView)
+
+            let stale = radarOverlays.dropLast()
+            for item in stale {
+                animateRadarOverlay(item.overlay, to: 0, in: mapView) { [weak mapView, weak self] in
+                    guard let self, let mapView else { return }
+                    mapView.removeOverlay(item.overlay)
+                    let removedID = ObjectIdentifier(item.overlay)
+                    self.radarOverlayAlphas[removedID] = nil
+                    self.radarRenderers[removedID] = nil
+                    self.radarOverlays.removeAll { $0.id == item.id }
+                }
+            }
+        }
+
+        private func animateRadarOverlay(
+            _ overlay: MKTileOverlay,
+            to targetAlpha: CGFloat,
+            in mapView: MKMapView,
+            completion: (() -> Void)? = nil
+        ) {
+            let overlayID = ObjectIdentifier(overlay)
+            let startAlpha = radarOverlayAlphas[overlayID] ?? 0
+            let steps = 12
+            let duration: TimeInterval = 0.32
+
+            for step in 1...steps {
+                let delay = duration / Double(steps) * Double(step)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak mapView] in
+                    guard let self, let mapView else { return }
+                    let progress = CGFloat(step) / CGFloat(steps)
+                    let eased = 1 - pow(1 - progress, 3)
+                    let alpha = startAlpha + (targetAlpha - startAlpha) * eased
+                    self.radarOverlayAlphas[overlayID] = alpha
+                    if let renderer = self.radarRenderers[overlayID] {
+                        renderer.alpha = alpha
+                        renderer.setNeedsDisplay()
+                    } else {
+                        mapView.setNeedsDisplay()
+                    }
+                    if step == steps {
+                        completion?()
+                    }
+                }
+            }
+        }
+
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let tileOverlay = overlay as? MKTileOverlay {
                 let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
-                renderer.alpha = tileOverlay is DwdWMSTileOverlay ? 0.74 : 0.82
+                if tileOverlay is DwdWMSTileOverlay {
+                    renderer.alpha = 0.74
+                } else {
+                    let overlayID = ObjectIdentifier(tileOverlay)
+                    renderer.alpha = radarOverlayAlphas[overlayID] ?? radarTargetAlpha
+                    radarRenderers[overlayID] = renderer
+                }
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
