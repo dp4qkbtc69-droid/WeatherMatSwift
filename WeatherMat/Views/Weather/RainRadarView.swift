@@ -2,6 +2,7 @@
 import SwiftUI
 import MapKit
 import UIKit
+import ImageIO
 
 private let rainRadarHomeRegion = MKCoordinateRegion(
     center: CLLocationCoordinate2D(latitude: 51.1, longitude: 10.4),
@@ -16,22 +17,6 @@ private enum DwdWMSLayer: String, Identifiable {
     var style: String { "blitzdichte" }
 }
 
-private enum RainRadarRange: String, CaseIterable, Identifiable {
-    case day = "-24h"
-    case radar = "-2h/+2h"
-    case twoDays = "+48h"
-    case week = "+7d"
-
-    var id: String { rawValue }
-
-    var isRadarAvailable: Bool {
-        switch self {
-        case .day, .radar: return true
-        case .twoDays, .week: return false
-        }
-    }
-}
-
 @MainActor
 @Observable
 private final class RainRadarViewModel {
@@ -40,7 +25,6 @@ private final class RainRadarViewModel {
     var isPlaying = false
     var isLoading = false
     var errorMessage: String?
-    var selectedRange: RainRadarRange = .radar
 
     var selectedFrame: RainRadarFrame? {
         let frames = visibleFrames
@@ -51,21 +35,28 @@ private final class RainRadarViewModel {
     var visibleFrames: [RainRadarFrame] {
         guard let frames = timeline?.frames, !frames.isEmpty else { return [] }
         guard let latestObserved = timeline?.latestObservedFrame else { return frames }
-        switch selectedRange {
-        case .day:
-            let cutoff = latestObserved.time.addingTimeInterval(-24 * 60 * 60)
-            return frames.filter { $0.time >= cutoff && $0.time <= latestObserved.time }
-        case .radar:
-            let cutoff = latestObserved.time.addingTimeInterval(-2 * 60 * 60)
-            return frames.filter { $0.time >= cutoff }
-        case .twoDays, .week:
-            return frames.filter { $0.time >= latestObserved.time }
-        }
+        let lowerBound = latestObserved.time.addingTimeInterval(-24 * 60 * 60)
+        let upperBound = latestObserved.time.addingTimeInterval(120 * 60 * 60)
+        return frames.filter { $0.time >= lowerBound && $0.time <= upperBound }
     }
 
     var selectedTimeLabel: String {
         guard let selectedFrame else { return "--:--" }
         return selectedFrame.time.formatted(.dateTime.hour().minute().locale(.init(identifier: "de_DE")))
+    }
+
+    var selectedDateLabel: String {
+        guard let selectedFrame else { return "--" }
+        return selectedFrame.time.formatted(.dateTime.weekday(.abbreviated).day().month(.wide).locale(.init(identifier: "de_DE")))
+    }
+
+    var availableRangeLabel: String {
+        guard let first = visibleFrames.first?.time,
+              let last = visibleFrames.last?.time,
+              let latest = timeline?.latestObservedFrame?.time else {
+            return "Zeitverlauf"
+        }
+        return "\(relativeLabel(for: first, relativeTo: latest)) bis \(relativeLabel(for: last, relativeTo: latest))"
     }
 
     func load() async {
@@ -79,10 +70,37 @@ private final class RainRadarViewModel {
                let index = visibleFrames.firstIndex(of: latest) {
                 selectedIndex = index
             }
+            isLoading = false
+            // Extend with ICON-EU in background – radar is already visible
+            Task { await appendIconEuFrames(to: loaded) }
         } catch {
             errorMessage = "Radar konnte nicht geladen werden."
+            isLoading = false
         }
-        isLoading = false
+    }
+
+    private func appendIconEuFrames(to radarTimeline: RainRadarTimeline) async {
+        guard let meta = try? await DwdIconForecastService.fetchForecastMeta() else { return }
+        let radarEnd = radarTimeline.latestObservedFrame?.time ?? Date()
+        let cutoff = radarEnd.addingTimeInterval(1800)
+        let iconFrames = meta.availableTimes
+            .filter { $0 > cutoff }
+            .map { time in
+                RainRadarFrame(
+                    time: time,
+                    path: "\(meta.layerName)|\(DwdIconForecastService.isoFormatter.string(from: time))",
+                    isForecast: true,
+                    frameSource: .dwdIconEu(layerName: meta.layerName)
+                )
+            }
+        guard !iconFrames.isEmpty else { return }
+        timeline = RainRadarTimeline(
+            host: radarTimeline.host,
+            attribution: radarTimeline.attribution + " · ICON-EU DWD",
+            source: radarTimeline.source,
+            tileMaxZoom: radarTimeline.tileMaxZoom,
+            frames: radarTimeline.frames + iconFrames
+        )
     }
 
     func advanceFrame() {
@@ -91,20 +109,15 @@ private final class RainRadarViewModel {
         selectedIndex = selectedIndex >= frames.count - 1 ? 0 : selectedIndex + 1
     }
 
-    func selectRange(_ range: RainRadarRange) {
-        guard range.isRadarAvailable else { return }
-        selectedRange = range
-        let frames = visibleFrames
-        guard !frames.isEmpty else {
-            selectedIndex = 0
-            return
+    private func relativeLabel(for date: Date, relativeTo reference: Date) -> String {
+        let seconds = date.timeIntervalSince(reference)
+        if abs(seconds) < 90 { return "jetzt" }
+        let hours = Int((seconds / 3600).rounded())
+        if abs(hours) < 24 {
+            return hours > 0 ? "+\(hours)h" : "\(hours)h"
         }
-        if let latest = timeline?.latestObservedFrame,
-           let latestIndex = frames.firstIndex(of: latest) {
-            selectedIndex = latestIndex
-        } else {
-            selectedIndex = min(selectedIndex, frames.count - 1)
-        }
+        let days = Int((Double(hours) / 24).rounded())
+        return days > 0 ? "+\(days)d" : "\(days)d"
     }
 }
 
@@ -195,6 +208,7 @@ struct RainRadarScreen: View {
                 region: mapRegion,
                 regionRevision: regionRevision,
                 host: viewModel.timeline?.host,
+                frames: viewModel.visibleFrames,
                 frame: viewModel.selectedFrame,
                 source: viewModel.timeline?.source,
                 tileMaxZoom: viewModel.timeline?.tileMaxZoom,
@@ -218,7 +232,7 @@ struct RainRadarScreen: View {
             }
 
             mapControls
-                .padding(.top, 150)
+                .padding(.top, 132)
                 .padding(.trailing, 16)
 
             if let noticeText {
@@ -230,7 +244,7 @@ struct RainRadarScreen: View {
                     .background(Color.black.opacity(0.38))
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
-                    .padding(.top, 152)
+                    .padding(.top, 134)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -238,7 +252,8 @@ struct RainRadarScreen: View {
         .task(id: viewModel.isPlaying) {
             guard viewModel.isPlaying else { return }
             while viewModel.isPlaying {
-                try? await Task.sleep(nanoseconds: 720_000_000)
+                let isLastFrame = viewModel.selectedIndex >= viewModel.visibleFrames.count - 1
+                try? await Task.sleep(nanoseconds: isLastFrame ? 1_600_000_000 : 520_000_000)
                 guard !Task.isCancelled else { return }
                 viewModel.advanceFrame()
             }
@@ -247,7 +262,7 @@ struct RainRadarScreen: View {
     }
 
     private var header: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 12) {
             HStack(spacing: 14) {
                 Button {
                     dismiss()
@@ -257,28 +272,43 @@ struct RainRadarScreen: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
+                .background(.white.opacity(0.12), in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(.white.opacity(0.22), lineWidth: 1)
+                )
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Niederschlag")
-                        .font(.system(size: 30, weight: .bold))
+                    Text("Radar")
+                        .font(.system(size: 28, weight: .bold))
+                    HStack(spacing: 6) {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 12, weight: .bold))
+                        Text(location?.name ?? "Deutschland")
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .opacity(0.88)
                     Text(dateLine)
-                        .font(.system(size: 19, weight: .medium))
+                        .font(.system(size: 14, weight: .semibold))
                         .monospacedDigit()
-                        .opacity(0.88)
+                        .opacity(0.70)
                 }
 
                 Spacer()
-
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 26, weight: .bold))
-                    .frame(width: 44, height: 44)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 46)
         }
         .foregroundStyle(.white)
-        .padding(.bottom, 18)
-        .background(Color(hex: "#304f9f"))
+        .padding(.horizontal, 18)
+        .padding(.top, 46)
+        .padding(.bottom, 14)
+        .background(Color.black.opacity(0.10))
+        .background(.white.opacity(0.10))
+        .background(.ultraThinMaterial.opacity(0.78))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.white.opacity(0.18))
+                .frame(height: 1)
+        }
     }
 
     private var mapControls: some View {
@@ -297,19 +327,13 @@ struct RainRadarScreen: View {
                 }
             }
             RadarRoundButton(icon: "drop.fill", selected: true) {
-                showNotice("Niederschlag aktiv")
+                showNotice("Radar aktiv")
             }
             RadarRoundButton(icon: "bolt.fill", selected: dwdLayers.contains(.lightningDensity)) {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     toggleDwdLayer(.lightningDensity)
                 }
                 showNotice(dwdLayers.contains(.lightningDensity) ? "DWD-Blitzdichte aktiv" : "DWD-Blitzdichte aus")
-            }
-            RadarRoundButton(icon: "house.fill") {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    mapRegion = rainRadarHomeRegion
-                    regionRevision += 1
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -346,13 +370,6 @@ struct RainRadarScreen: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
             } else if !viewModel.visibleFrames.isEmpty {
-                RainRadarRangePicker(
-                    selectedRange: Binding(
-                        get: { viewModel.selectedRange },
-                        set: { viewModel.selectRange($0) }
-                    )
-                )
-
                 RainRadarTimelineControl(
                     frames: viewModel.visibleFrames,
                     selectedIndex: Binding(
@@ -366,16 +383,20 @@ struct RainRadarScreen: View {
                         get: { viewModel.isPlaying },
                         set: { viewModel.isPlaying = $0 }
                     ),
-                    selectedTimeLabel: viewModel.selectedTimeLabel
+                    selectedTimeLabel: viewModel.selectedTimeLabel,
+                    selectedDateLabel: viewModel.selectedDateLabel,
+                    rangeLabel: viewModel.availableRangeLabel
                 )
 
-                Text(viewModel.selectedFrame?.isForecast == true ? "Nowcast" : "Aktuell")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.92))
-
-                Text("Radar: \(viewModel.timeline?.attribution ?? "Radarquelle")")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.66))
+                HStack {
+                    Text(viewModel.selectedFrame?.isForecast == true ? "Prognose" : "Radar")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                    Spacer()
+                    Text(viewModel.timeline?.attribution ?? "Radarquelle")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
             } else {
                 Text("Lade Radar...")
                     .font(.system(size: 16, weight: .semibold))
@@ -383,7 +404,8 @@ struct RainRadarScreen: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
         .background(.black.opacity(0.28))
         .background(.ultraThinMaterial.opacity(0.72))
     }
@@ -400,6 +422,7 @@ private struct RadarMapRepresentable: UIViewRepresentable {
     let region: MKCoordinateRegion
     let regionRevision: Int
     let host: String?
+    let frames: [RainRadarFrame]
     let frame: RainRadarFrame?
     let source: RainRadarSource?
     let tileMaxZoom: Int?
@@ -429,21 +452,14 @@ private struct RadarMapRepresentable: UIViewRepresentable {
             context.coordinator.lastAppliedRegionRevision = regionRevision
         }
 
-        if let host, let frame {
-            let source = source ?? .dwd
-            let layerID = "\(host)-\(source)-\(tileMaxZoom ?? 0)"
-            if context.coordinator.currentLayerID != layerID {
-                let overlay: MKTileOverlay = source == .dwd
-                    ? DwdRadarTileOverlay(host: host, framePath: frame.path, sourceMaxZoom: tileMaxZoom ?? 8)
-                    : ClampedRainTileOverlay(host: host, framePath: frame.path)
-                overlay.canReplaceMapContent = false
-                overlay.minimumZ = 3
-                overlay.maximumZ = 22
-                context.coordinator.replaceRadarOverlay(with: overlay, id: layerID, in: mapView)
-            } else if context.coordinator.updateRadarOverlay(framePath: frame.path, sourceMaxZoom: tileMaxZoom ?? 8) {
-                context.coordinator.radarRenderer?.reloadData()
-            }
-        }
+        context.coordinator.updateRadarRequest(
+            host: host,
+            frames: frames,
+            selectedFrame: frame,
+            source: source ?? .dwd,
+            tileMaxZoom: tileMaxZoom ?? 8,
+            in: mapView
+        )
 
         let currentLayerIDs = Set(dwdLayers.map(\.id))
         for (id, overlay) in context.coordinator.dwdOverlays where !currentLayerIDs.contains(id) {
@@ -459,53 +475,71 @@ private struct RadarMapRepresentable: UIViewRepresentable {
             mapView.addOverlay(overlay, level: .aboveLabels)
         }
 
-        mapView.removeAnnotations(mapView.annotations)
-        if let userCoordinate {
-            let pin = MKPointAnnotation()
-            pin.coordinate = userCoordinate
-            pin.title = "Dein Ort"
-            mapView.addAnnotation(pin)
-        }
+        context.coordinator.syncUserAnnotation(userCoordinate, in: mapView)
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
-        var radarOverlay: MKTileOverlay?
-        var radarRenderer: MKTileOverlayRenderer?
+        private let compositor = RadarFrameCompositor()
+        private var radarRequest: RadarFrameRequest?
+        private var activeRadarOverlay: RadarFrameImageOverlay?
+        private var activeRadarRenderer: RadarFrameImageRenderer?
+        private var pendingPreviousOverlay: RadarFrameImageOverlay?
+        private var pendingPreviousRenderer: RadarFrameImageRenderer?
+        private var rendererByOverlay: [ObjectIdentifier: RadarFrameImageRenderer] = [:]
+        private var currentRenderContextID: String?
+        private var renderedFrameKey: String?
+        private var renderTask: Task<Void, Never>?
+        private var prewarmTask: Task<Void, Never>?
         var dwdOverlays: [String: MKTileOverlay] = [:]
-        var currentLayerID: String?
         var lastAppliedRegionRevision = 0
+        private var userAnnotation: MKPointAnnotation?
 
-        func replaceRadarOverlay(with overlay: MKTileOverlay, id: String, in mapView: MKMapView) {
-            let oldOverlay = radarOverlay
-            radarOverlay = overlay
-            radarRenderer = nil
-            currentLayerID = id
-            mapView.addOverlay(overlay, level: .aboveLabels)
-            if let oldOverlay {
-                mapView.removeOverlay(oldOverlay)
+        func updateRadarRequest(
+            host: String?,
+            frames: [RainRadarFrame],
+            selectedFrame: RainRadarFrame?,
+            source: RainRadarSource,
+            tileMaxZoom: Int,
+            in mapView: MKMapView
+        ) {
+            guard let host, let selectedFrame, !frames.isEmpty else {
+                clearRadar(in: mapView)
+                return
             }
-        }
-
-        func updateRadarOverlay(framePath: String, sourceMaxZoom: Int) -> Bool {
-            if let overlay = radarOverlay as? DwdRadarTileOverlay {
-                return overlay.update(framePath: framePath, sourceMaxZoom: sourceMaxZoom)
-            }
-            if let overlay = radarOverlay as? ClampedRainTileOverlay {
-                return overlay.update(framePath: framePath)
-            }
-            return false
+            radarRequest = RadarFrameRequest(
+                host: host,
+                frames: frames,
+                selectedFrame: selectedFrame,
+                source: source,
+                tileMaxZoom: tileMaxZoom
+            )
+            refreshRadar(in: mapView)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            if let tileOverlay = overlay as? MKTileOverlay {
-                let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
-                renderer.alpha = tileOverlay is DwdWMSTileOverlay ? 0.74 : 0.82
-                if tileOverlay === radarOverlay {
-                    radarRenderer = renderer
+            if let radarOverlay = overlay as? RadarFrameImageOverlay {
+                let renderer = RadarFrameImageRenderer(overlay: radarOverlay)
+                renderer.alpha = 0
+                rendererByOverlay[ObjectIdentifier(radarOverlay)] = renderer
+                if radarOverlay === activeRadarOverlay {
+                    activeRadarRenderer = renderer
+                    triggerRadarCrossfade(nextOverlay: radarOverlay, nextRenderer: renderer, in: mapView)
                 }
                 return renderer
             }
+            if let tileOverlay = overlay as? MKTileOverlay {
+                let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
+                renderer.alpha = 0.74
+                return renderer
+            }
             return MKOverlayRenderer(overlay: overlay)
+        }
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            guard radarRequest != nil else { return }
+            currentRenderContextID = nil
+            renderedFrameKey = nil
+            refreshRadar(in: mapView)
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -514,10 +548,149 @@ private struct RadarMapRepresentable: UIViewRepresentable {
                 ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
             view.annotation = annotation
             if let marker = view as? MKMarkerAnnotationView {
-                marker.markerTintColor = UIColor(Color(hex: "#304f9f"))
+                marker.markerTintColor = UIColor(Color(hex: "#1a9be8"))
                 marker.glyphImage = UIImage(systemName: "location.fill")
             }
             return view
+        }
+
+        func syncUserAnnotation(_ coordinate: CLLocationCoordinate2D?, in mapView: MKMapView) {
+            guard let coordinate else {
+                if let userAnnotation {
+                    mapView.removeAnnotation(userAnnotation)
+                    self.userAnnotation = nil
+                }
+                return
+            }
+
+            if let userAnnotation {
+                let current = userAnnotation.coordinate
+                let changed = abs(current.latitude - coordinate.latitude) > 0.0001 ||
+                    abs(current.longitude - coordinate.longitude) > 0.0001
+                guard changed else { return }
+                userAnnotation.coordinate = coordinate
+                return
+            }
+
+            let annotation = MKPointAnnotation()
+            annotation.coordinate = coordinate
+            annotation.title = "Dein Ort"
+            userAnnotation = annotation
+            mapView.addAnnotation(annotation)
+        }
+
+        private func refreshRadar(in mapView: MKMapView) {
+            guard let request = radarRequest,
+                  let context = RadarFrameRenderContext(mapView: mapView, request: request)
+            else { return }
+
+            if currentRenderContextID != context.id {
+                currentRenderContextID = context.id
+                renderedFrameKey = nil
+                compositor.removeAllImages()
+                prewarmFrames(for: request, context: context)
+            }
+
+            let frameKey = context.cacheKey(for: request.selectedFrame)
+            guard renderedFrameKey != frameKey else { return }
+
+            if let image = compositor.image(for: frameKey) {
+                applyRadarImage(image, frameKey: frameKey, context: context, in: mapView)
+                prewarmFrames(for: request, context: context)
+                return
+            }
+
+            renderTask?.cancel()
+            renderTask = Task { @MainActor [weak self, weak mapView] in
+                guard let self, let mapView else { return }
+                do {
+                    let image = try await compositor.image(for: request.selectedFrame, context: context)
+                    guard !Task.isCancelled else { return }
+                    applyRadarImage(image, frameKey: frameKey, context: context, in: mapView)
+                    prewarmFrames(for: request, context: context)
+                } catch {
+                    // Keep the previous complete frame visible rather than flashing an empty radar layer.
+                }
+            }
+        }
+
+        private func prewarmFrames(for request: RadarFrameRequest, context: RadarFrameRenderContext) {
+            prewarmTask?.cancel()
+            prewarmTask = Task { @MainActor [compositor] in
+                for frame in request.framesForPrewarm {
+                    guard !Task.isCancelled else { return }
+                    _ = try? await compositor.image(for: frame, context: context)
+                }
+            }
+        }
+
+        private func applyRadarImage(
+            _ image: CGImage,
+            frameKey: String,
+            context: RadarFrameRenderContext,
+            in mapView: MKMapView
+        ) {
+            guard renderedFrameKey != frameKey else { return }
+
+            if let orphanOverlay = pendingPreviousOverlay,
+               orphanOverlay !== activeRadarOverlay {
+                mapView.removeOverlay(orphanOverlay)
+                rendererByOverlay[ObjectIdentifier(orphanOverlay)] = nil
+            }
+
+            pendingPreviousOverlay = activeRadarOverlay
+            pendingPreviousRenderer = activeRadarRenderer
+            let nextOverlay = RadarFrameImageOverlay(
+                image: image,
+                boundingMapRect: context.boundingMapRect,
+                targetAlpha: 0.82
+            )
+
+            activeRadarOverlay = nextOverlay
+            activeRadarRenderer = nil
+            renderedFrameKey = frameKey
+            mapView.addOverlay(nextOverlay, level: .aboveLabels)
+        }
+
+        private func triggerRadarCrossfade(
+            nextOverlay: RadarFrameImageOverlay,
+            nextRenderer: RadarFrameImageRenderer,
+            in mapView: MKMapView
+        ) {
+            let previousOverlay = pendingPreviousOverlay
+            let previousRenderer = pendingPreviousRenderer
+            pendingPreviousOverlay = nil
+            pendingPreviousRenderer = nil
+
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.26)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+            previousRenderer?.alpha = 0
+            nextRenderer.alpha = nextOverlay.targetAlpha
+            CATransaction.setCompletionBlock { [weak self, weak mapView, weak previousOverlay] in
+                guard let mapView, let previousOverlay else { return }
+                mapView.removeOverlay(previousOverlay)
+                self?.rendererByOverlay[ObjectIdentifier(previousOverlay)] = nil
+            }
+            CATransaction.commit()
+        }
+
+        private func clearRadar(in mapView: MKMapView) {
+            renderTask?.cancel()
+            prewarmTask?.cancel()
+            renderedFrameKey = nil
+            currentRenderContextID = nil
+            if let activeRadarOverlay {
+                mapView.removeOverlay(activeRadarOverlay)
+            }
+            if let pendingPreviousOverlay {
+                mapView.removeOverlay(pendingPreviousOverlay)
+            }
+            activeRadarOverlay = nil
+            activeRadarRenderer = nil
+            pendingPreviousOverlay = nil
+            pendingPreviousRenderer = nil
+            rendererByOverlay.removeAll()
         }
 
         func regionApproximatelyMatches(_ lhs: MKCoordinateRegion, _ rhs: MKCoordinateRegion) -> Bool {
@@ -526,6 +699,259 @@ private struct RadarMapRepresentable: UIViewRepresentable {
             abs(lhs.span.latitudeDelta - rhs.span.latitudeDelta) < 0.4 &&
             abs(lhs.span.longitudeDelta - rhs.span.longitudeDelta) < 0.4
         }
+    }
+}
+
+private struct RadarFrameRequest {
+    let host: String
+    let frames: [RainRadarFrame]
+    let selectedFrame: RainRadarFrame
+    let source: RainRadarSource
+    let tileMaxZoom: Int
+
+    var framesForPrewarm: [RainRadarFrame] {
+        guard let selectedIndex = frames.firstIndex(of: selectedFrame) else { return Array(frames.prefix(8)) }
+        let upcoming = frames[selectedIndex...]
+        let previous = frames[..<selectedIndex]
+        return Array((upcoming + previous).prefix(8))
+    }
+}
+
+private struct RadarFrameRenderContext {
+    let host: String
+    let source: RainRadarSource
+    let sourceZoom: Int
+    let xRange: ClosedRange<Int>
+    let yRange: ClosedRange<Int>
+    let boundingMapRect: MKMapRect
+    let id: String
+
+    private static let tilePixelSize = 512
+
+    @MainActor
+    init?(mapView: MKMapView, request: RadarFrameRequest) {
+        let mapRect = mapView.visibleMapRect
+        guard mapView.bounds.width > 0,
+              mapView.bounds.height > 0,
+              mapRect.width > 0,
+              mapRect.height > 0 else {
+            return nil
+        }
+
+        let zoomScale = Double(mapView.bounds.width) / mapRect.width
+        var zoom = min(max(Int(floor(log2(zoomScale) + 20.0)), 3), max(3, request.tileMaxZoom))
+        var tileRange = Self.tileRange(for: mapRect, zoom: zoom)
+        while (tileRange.x.count > 10 || tileRange.y.count > 14), zoom > 3 {
+            zoom -= 1
+            tileRange = Self.tileRange(for: mapRect, zoom: zoom)
+        }
+
+        let tileMapSize = MKMapSize.world.width / pow(2.0, Double(zoom))
+        let rect = MKMapRect(
+            x: Double(tileRange.x.lowerBound) * tileMapSize,
+            y: Double(tileRange.y.lowerBound) * tileMapSize,
+            width: Double(tileRange.x.count) * tileMapSize,
+            height: Double(tileRange.y.count) * tileMapSize
+        )
+
+        host = request.host
+        source = request.source
+        sourceZoom = zoom
+        xRange = tileRange.x
+        yRange = tileRange.y
+        boundingMapRect = rect
+        id = "\(request.host)|\(request.source)|z\(zoom)|x\(tileRange.x.lowerBound)-\(tileRange.x.upperBound)|y\(tileRange.y.lowerBound)-\(tileRange.y.upperBound)"
+    }
+
+    var imageSize: CGSize {
+        CGSize(width: xRange.count * Self.tilePixelSize, height: yRange.count * Self.tilePixelSize)
+    }
+
+    func cacheKey(for frame: RainRadarFrame) -> String {
+        "\(id)|\(frame.id)"
+    }
+
+    func url(for frame: RainRadarFrame, x: Int, y: Int) -> URL? {
+        if case .dwdIconEu(let layerName) = frame.frameSource {
+            return DwdIconForecastService.tileURL(layerName: layerName, time: frame.time,
+                                                   x: x, y: y, zoom: sourceZoom)
+        }
+        switch source {
+        case .dwd:
+            return URL(string: "\(host)\(frame.path)/\(sourceZoom)/\(x)/\(y).png")
+        case .rainViewer:
+            return URL(string: "\(host)\(frame.path)/512/\(sourceZoom)/\(x)/\(y)/2/1_1.png")
+        }
+    }
+
+    func drawRect(for x: Int, y: Int) -> CGRect {
+        CGRect(
+            x: (x - xRange.lowerBound) * Self.tilePixelSize,
+            y: (y - yRange.lowerBound) * Self.tilePixelSize,
+            width: Self.tilePixelSize,
+            height: Self.tilePixelSize
+        )
+    }
+
+    private static func tileRange(for mapRect: MKMapRect, zoom: Int) -> (x: ClosedRange<Int>, y: ClosedRange<Int>) {
+        let tileCount = Int(pow(2.0, Double(zoom)))
+        let tileMapSize = MKMapSize.world.width / Double(tileCount)
+        let minX = min(max(Int(floor(mapRect.minX / tileMapSize)), 0), tileCount - 1)
+        let maxX = min(max(Int(floor((mapRect.maxX - 1) / tileMapSize)), 0), tileCount - 1)
+        let minY = min(max(Int(floor(mapRect.minY / tileMapSize)), 0), tileCount - 1)
+        let maxY = min(max(Int(floor((mapRect.maxY - 1) / tileMapSize)), 0), tileCount - 1)
+        return (minX...max(minX, maxX), minY...max(minY, maxY))
+    }
+}
+
+@MainActor
+private final class RadarFrameCompositor {
+    private let cache = NSCache<NSString, RadarCachedImage>()
+    private var inFlight: [String: Task<CGImage, Error>] = [:]
+
+    init() {
+        cache.countLimit = 48
+    }
+
+    func image(for key: String) -> CGImage? {
+        cache.object(forKey: key as NSString)?.image
+    }
+
+    func image(for frame: RainRadarFrame, context: RadarFrameRenderContext) async throws -> CGImage {
+        let key = context.cacheKey(for: frame)
+        if let cached = cache.object(forKey: key as NSString)?.image {
+            return cached
+        }
+        if let task = inFlight[key] {
+            return try await task.value
+        }
+
+        let task = Task<CGImage, Error> {
+            try await Self.compose(frame: frame, context: context)
+        }
+        inFlight[key] = task
+
+        do {
+            let image = try await task.value
+            cache.setObject(RadarCachedImage(image), forKey: key as NSString)
+            inFlight[key] = nil
+            return image
+        } catch {
+            inFlight[key] = nil
+            throw error
+        }
+    }
+
+    func removeAllImages() {
+        cache.removeAllObjects()
+        for task in inFlight.values {
+            task.cancel()
+        }
+        inFlight.removeAll()
+    }
+
+    private static func compose(frame: RainRadarFrame, context: RadarFrameRenderContext) async throws -> CGImage {
+        let tilePayloads = await loadTiles(frame: frame, context: context)
+        let width = Int(context.imageSize.width)
+        let height = Int(context.imageSize.height)
+        guard let drawingContext = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+
+        drawingContext.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        drawingContext.translateBy(x: 0, y: CGFloat(height))
+        drawingContext.scaleBy(x: 1, y: -1)
+        for payload in tilePayloads {
+            drawingContext.draw(payload.image, in: context.drawRect(for: payload.x, y: payload.y))
+        }
+        guard let image = drawingContext.makeImage() else { throw URLError(.cannotDecodeContentData) }
+        return image
+    }
+
+    private static func loadTiles(frame: RainRadarFrame, context: RadarFrameRenderContext) async -> [RadarTilePayload] {
+        await withTaskGroup(of: RadarTilePayload?.self) { group in
+            for x in context.xRange {
+                for y in context.yRange {
+                    guard let url = context.url(for: frame, x: x, y: y) else { continue }
+                    group.addTask {
+                        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 12)
+                        do {
+                            let (data, response) = try await URLSession.shared.data(for: request)
+                            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                                return nil
+                            }
+                            return RadarTilePayload(x: x, y: y, image: image)
+                        } catch {
+                            return nil
+                        }
+                    }
+                }
+            }
+
+            var payloads: [RadarTilePayload] = []
+            for await payload in group {
+                if let payload {
+                    payloads.append(payload)
+                }
+            }
+            return payloads
+        }
+    }
+}
+
+private final class RadarCachedImage {
+    let image: CGImage
+
+    init(_ image: CGImage) {
+        self.image = image
+    }
+}
+
+private struct RadarTilePayload: Sendable {
+    let x: Int
+    let y: Int
+    let image: CGImage
+}
+
+private final class RadarFrameImageOverlay: NSObject, MKOverlay {
+    let image: CGImage
+    let boundingMapRect: MKMapRect
+    let coordinate: CLLocationCoordinate2D
+    let targetAlpha: CGFloat
+
+    init(image: CGImage, boundingMapRect: MKMapRect, targetAlpha: CGFloat) {
+        self.image = image
+        self.boundingMapRect = boundingMapRect
+        self.coordinate = MKMapPoint(x: boundingMapRect.midX, y: boundingMapRect.midY).coordinate
+        self.targetAlpha = targetAlpha
+    }
+}
+
+private final class RadarFrameImageRenderer: MKOverlayRenderer {
+    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
+        guard let overlay = overlay as? RadarFrameImageOverlay else { return }
+        let drawRect = rect(for: overlay.boundingMapRect)
+        context.saveGState()
+        context.translateBy(x: drawRect.minX, y: drawRect.maxY)
+        context.scaleBy(
+            x: drawRect.width / CGFloat(overlay.image.width),
+            y: -drawRect.height / CGFloat(overlay.image.height)
+        )
+        context.draw(
+            overlay.image,
+            in: CGRect(x: 0, y: 0, width: overlay.image.width, height: overlay.image.height)
+        )
+        context.restoreGState()
     }
 }
 
@@ -538,150 +964,19 @@ private struct RadarRoundButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(selected ? .white : Color(hex: "#566073"))
+                .foregroundStyle(selected ? Color(hex: "#5f4500") : .white.opacity(0.90))
                 .frame(width: 58, height: 58)
-                .background(selected ? Color(hex: "#304f9f") : Color.white.opacity(0.96))
+                .background(selected ? Color(hex: "#ffd166") : Color.black.opacity(0.10))
+                .background(.white.opacity(selected ? 0.0 : 0.13))
+                .background(.ultraThinMaterial.opacity(0.74))
                 .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(.white.opacity(selected ? 0.54 : 0.22), lineWidth: 1)
+                )
                 .shadow(color: .black.opacity(0.16), radius: 12, x: 0, y: 5)
         }
         .buttonStyle(.plain)
-    }
-}
-
-private final class ClampedRainTileOverlay: MKTileOverlay {
-    private let host: String
-    private var framePath: String
-    private let sourceMaxZoom = 9
-
-    init(host: String, framePath: String) {
-        self.host = host
-        self.framePath = framePath
-        super.init(urlTemplate: nil)
-        tileSize = CGSize(width: 512, height: 512)
-    }
-
-    func update(framePath: String) -> Bool {
-        guard self.framePath != framePath else { return false }
-        self.framePath = framePath
-        return true
-    }
-
-    override func url(forTilePath path: MKTileOverlayPath) -> URL {
-        sourceURL(for: path)
-    }
-
-    override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
-        let handler = TileResultHandler(result)
-        let url = sourceURL(for: path)
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 12)
-        let maxZoom = sourceMaxZoom
-        URLSession.shared.dataTask(with: request) { data, _, error in
-            guard error == nil, let data else {
-                handler.finish(data: nil, error: error)
-                return
-            }
-            guard path.z > maxZoom,
-                  let image = UIImage(data: data),
-                  let cropped = Self.croppedTileData(from: image, path: path, sourceMaxZoom: maxZoom)
-            else {
-                handler.finish(data: data, error: nil)
-                return
-            }
-            handler.finish(data: cropped, error: nil)
-        }.resume()
-    }
-
-    private func sourceURL(for path: MKTileOverlayPath) -> URL {
-        let delta = max(0, path.z - sourceMaxZoom)
-        let sourceZ = min(path.z, sourceMaxZoom)
-        let sourceX = delta == 0 ? path.x : path.x >> delta
-        let sourceY = delta == 0 ? path.y : path.y >> delta
-        return URL(string: "\(host)\(framePath)/512/\(sourceZ)/\(sourceX)/\(sourceY)/2/1_1.png")!
-    }
-
-    fileprivate static func croppedTileData(from image: UIImage, path: MKTileOverlayPath, sourceMaxZoom: Int) -> Data? {
-        let delta = path.z - sourceMaxZoom
-        guard delta > 0 else { return image.pngData() }
-
-        let divisions = CGFloat(1 << min(delta, 12))
-        let sourceSize = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
-        let cropWidth = sourceSize.width / divisions
-        let cropHeight = sourceSize.height / divisions
-        let localX = CGFloat(path.x & ((1 << min(delta, 12)) - 1))
-        let localY = CGFloat(path.y & ((1 << min(delta, 12)) - 1))
-        let cropRect = CGRect(x: localX * cropWidth, y: localY * cropHeight, width: cropWidth, height: cropHeight)
-
-        guard let cgImage = image.cgImage?.cropping(to: cropRect) else { return image.pngData() }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        let rendered = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512), format: format).image { _ in
-            UIImage(cgImage: cgImage).draw(in: CGRect(x: 0, y: 0, width: 512, height: 512))
-        }
-        return rendered.pngData()
-    }
-}
-
-private final class DwdRadarTileOverlay: MKTileOverlay {
-    private let host: String
-    private var framePath: String
-    private var sourceMaxZoom: Int
-
-    init(host: String, framePath: String, sourceMaxZoom: Int) {
-        self.host = host
-        self.framePath = framePath
-        self.sourceMaxZoom = sourceMaxZoom
-        super.init(urlTemplate: nil)
-        tileSize = CGSize(width: 512, height: 512)
-    }
-
-    func update(framePath: String, sourceMaxZoom: Int) -> Bool {
-        let changed = self.framePath != framePath || self.sourceMaxZoom != sourceMaxZoom
-        self.framePath = framePath
-        self.sourceMaxZoom = sourceMaxZoom
-        return changed
-    }
-
-    override func url(forTilePath path: MKTileOverlayPath) -> URL {
-        sourceURL(for: path)
-    }
-
-    override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
-        let handler = TileResultHandler(result)
-        let url = sourceURL(for: path)
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 12)
-        let maxZoom = sourceMaxZoom
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            guard error == nil,
-                  let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let data else {
-                handler.finish(data: Self.emptyTileData(), error: nil)
-                return
-            }
-            guard path.z > maxZoom,
-                  let image = UIImage(data: data),
-                  let cropped = ClampedRainTileOverlay.croppedTileData(from: image, path: path, sourceMaxZoom: maxZoom)
-            else {
-                handler.finish(data: data, error: nil)
-                return
-            }
-            handler.finish(data: cropped, error: nil)
-        }.resume()
-    }
-
-    private func sourceURL(for path: MKTileOverlayPath) -> URL {
-        let delta = max(0, path.z - sourceMaxZoom)
-        let sourceZ = min(path.z, sourceMaxZoom)
-        let sourceX = delta == 0 ? path.x : path.x >> delta
-        let sourceY = delta == 0 ? path.y : path.y >> delta
-        return URL(string: "\(host)\(framePath)/\(sourceZ)/\(sourceX)/\(sourceY).png")!
-    }
-
-    private static func emptyTileData() -> Data {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512), format: format).image { _ in }
-        return image.pngData() ?? Data()
     }
 }
 
@@ -726,130 +1021,223 @@ private final class DwdWMSTileOverlay: MKTileOverlay {
     }
 }
 
-private final class TileResultHandler: @unchecked Sendable {
-    private let result: (Data?, (any Error)?) -> Void
-
-    init(_ result: @escaping (Data?, (any Error)?) -> Void) {
-        self.result = result
-    }
-
-    func finish(data: Data?, error: (any Error)?) {
-        result(data, error)
-    }
-}
-
-private struct RainRadarRangePicker: View {
-    @Binding var selectedRange: RainRadarRange
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(RainRadarRange.allCases) { range in
-                Button {
-                    selectedRange = range
-                } label: {
-                    Text(range.rawValue)
-                        .font(.system(size: 15, weight: .bold))
-                        .monospacedDigit()
-                        .foregroundStyle(rangeForeground(range))
-                        .frame(minWidth: 64)
-                        .padding(.vertical, 9)
-                        .background(rangeBackground(range))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                .disabled(!range.isRadarAvailable)
-            }
-        }
-    }
-
-    private func rangeForeground(_ range: RainRadarRange) -> Color {
-        if !range.isRadarAvailable { return .white.opacity(0.46) }
-        return selectedRange == range ? Color(hex: "#304f9f") : .white
-    }
-
-    private func rangeBackground(_ range: RainRadarRange) -> Color {
-        if !range.isRadarAvailable { return .black.opacity(0.18) }
-        return selectedRange == range ? .white.opacity(0.94) : .white.opacity(0.16)
-    }
-}
-
 private struct RainRadarTimelineControl: View {
     let frames: [RainRadarFrame]
     @Binding var selectedIndex: Int
     @Binding var isPlaying: Bool
     let selectedTimeLabel: String
+    let selectedDateLabel: String
+    let rangeLabel: String
+    private let daySegments: [RadarTimelineDaySegment]
+    private let forecastStartIndex: Int?
+    private let iconEuStartIndex: Int?
 
     private var maxIndex: Int { max(frames.count - 1, 0) }
 
+    init(
+        frames: [RainRadarFrame],
+        selectedIndex: Binding<Int>,
+        isPlaying: Binding<Bool>,
+        selectedTimeLabel: String,
+        selectedDateLabel: String,
+        rangeLabel: String
+    ) {
+        self.frames = frames
+        _selectedIndex = selectedIndex
+        _isPlaying = isPlaying
+        self.selectedTimeLabel = selectedTimeLabel
+        self.selectedDateLabel = selectedDateLabel
+        self.rangeLabel = rangeLabel
+        daySegments = Self.makeDaySegments(for: frames)
+        forecastStartIndex = frames.firstIndex(where: \.isForecast)
+        iconEuStartIndex = frames.firstIndex(where: {
+            if case .dwdIconEu = $0.frameSource { return true }
+            return false
+        })
+    }
+
     var body: some View {
-        VStack(spacing: 7) {
-            HStack(alignment: .bottom) {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
                 Button {
                     isPlaying.toggle()
                 } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(Color(hex: "#304f9f"))
-                        .frame(width: 44, height: 38)
-                        .background(.white.opacity(0.96))
+                        .foregroundStyle(Color(hex: "#5f4500"))
+                        .frame(width: 42, height: 42)
+                        .background(.white.opacity(0.84))
+                        .background(.ultraThinMaterial)
                         .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(.white.opacity(0.58), lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 5)
                 }
                 .buttonStyle(.plain)
 
-                Text(selectedTimeLabel)
-                    .font(.system(size: 18, weight: .bold))
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .background(Color(hex: "#304f9f"))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(selectedTimeLabel)
+                        .font(.system(size: 20, weight: .bold))
+                        .monospacedDigit()
+                    Text(selectedDateLabel)
+                        .font(.system(size: 12, weight: .bold))
+                        .lineLimit(1)
+                    Text(rangeLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.68))
+                        .lineLimit(1)
+                }
+
                 Spacer()
-                Text("\(relativeLabel(for: frames.first?.time)) / \(relativeLabel(for: frames.last?.time))")
+
+                Text(activeFrameKind)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.16))
+                    .background(.ultraThinMaterial.opacity(0.75))
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(.white.opacity(0.24), lineWidth: 1)
+                    )
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
             }
-            .font(.system(size: 18, weight: .semibold))
             .foregroundStyle(.white)
-            .monospacedDigit()
 
             GeometryReader { proxy in
                 let width = max(1, proxy.size.width)
                 let progress = maxIndex == 0 ? 0 : CGFloat(selectedIndex) / CGFloat(maxIndex)
-                let knobX = min(max(progress * width, 10), width - 10)
+                let knobX = min(max(progress * width, 12), width - 12)
 
                 ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(.white.opacity(0.62))
-                        .frame(height: 2)
-                        .offset(y: 17)
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(.white.opacity(0.10))
+                        .background(.ultraThinMaterial.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18)
+                                .stroke(.white.opacity(0.24), lineWidth: 1)
+                        )
+                        .overlay(alignment: .top) {
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(.white.opacity(0.18))
+                                .frame(height: 1)
+                                .padding(.horizontal, 12)
+                                .padding(.top, 1)
+                        }
+
+                    ForEach(daySegments) { segment in
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(daySegmentColor(segment.ordinal).opacity(segment.containsSelectedIndex(selectedIndex) ? 0.26 : 0.15))
+                            .frame(width: daySegmentWidth(segment, totalWidth: width), height: 32)
+                            .position(x: daySegmentMidX(segment, totalWidth: width), y: 35)
+                    }
+
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.white.opacity(0.20))
+                            .frame(height: 7)
+
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.88), .white.opacity(0.46)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(width: max(8, knobX), height: 7)
+                    }
+                    .padding(.horizontal, 12)
+                    .offset(y: 20)
+
+                    if let forecastStartIndex {
+                        let forecastX = timelineX(for: forecastStartIndex, totalWidth: width)
+                        Rectangle()
+                            .fill(Color(hex: "#ffd166").opacity(0.88))
+                            .frame(width: 2, height: 43)
+                            .position(x: forecastX, y: 36)
+
+                        Text("Prognose")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color(hex: "#5f4500"))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color(hex: "#ffd166").opacity(0.94))
+                            .clipShape(Capsule())
+                            .position(x: min(max(forecastX + 34, 42), width - 42), y: 49)
+                    }
+
+                    if let iconEuStartIndex {
+                        let iconX = timelineX(for: iconEuStartIndex, totalWidth: width)
+                        Rectangle()
+                            .fill(Color(hex: "#9ee8c1").opacity(0.88))
+                            .frame(width: 2, height: 43)
+                            .position(x: iconX, y: 36)
+
+                        Text("ICON-EU")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color(hex: "#1a4d35"))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color(hex: "#9ee8c1").opacity(0.94))
+                            .clipShape(Capsule())
+                            .position(x: min(max(iconX + 38, 46), width - 46), y: 49)
+                    }
 
                     HStack(alignment: .top, spacing: 0) {
                         ForEach(frames.indices, id: \.self) { index in
                             VStack(spacing: 4) {
-                                Rectangle()
-                                    .fill(.white.opacity(index == selectedIndex ? 0.98 : 0.72))
-                                    .frame(width: 2, height: index % 3 == 0 ? 22 : 13)
-                                if index % 3 == 0 {
-                                    Text(frames[index].time.formatted(.dateTime.hour().minute().locale(.init(identifier: "de_DE"))))
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.white.opacity(0.86))
-                                        .monospacedDigit()
-                                        .fixedSize()
+                                RoundedRectangle(cornerRadius: 1)
+                                    .fill(.white.opacity(index == selectedIndex ? 1 : 0.58))
+                                    .frame(width: 2, height: tickHeight(for: index))
+                                if shouldShowLabel(at: index) {
+                                    Text(tickLabel(for: index))
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.74))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
                                 }
                             }
                             .frame(maxWidth: .infinity)
                         }
                     }
+                    .padding(.horizontal, 12)
+                    .offset(y: 2)
 
-                    Circle()
-                        .fill(Color(hex: "#304f9f"))
-                        .stroke(.white, lineWidth: 3)
-                        .frame(width: 22, height: 22)
-                        .position(x: knobX, y: 18)
+                    ZStack {
+                        Circle()
+                            .fill(.white.opacity(0.22))
+                            .background(.ultraThinMaterial, in: Circle())
+                            .frame(width: 32, height: 32)
+                            .overlay(
+                                Circle()
+                                    .stroke(.white.opacity(0.70), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
+                        Circle()
+                            .fill(Color(hex: "#ffd166"))
+                            .frame(width: 18, height: 18)
+                            .overlay(
+                                Circle()
+                                    .stroke(.white.opacity(0.90), lineWidth: 2)
+                            )
+                    }
+                    .position(x: knobX, y: 23)
 
                     Rectangle()
-                        .fill(Color(hex: "#304f9f"))
-                        .frame(width: 3, height: 60)
-                        .position(x: knobX, y: 42)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(hex: "#ffd166"), Color(hex: "#ffd166").opacity(0.18)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 2, height: 40)
+                        .position(x: knobX, y: 45)
                 }
                 .contentShape(Rectangle())
                 .gesture(
@@ -861,20 +1249,128 @@ private struct RainRadarTimelineControl: View {
                         }
                 )
             }
-            .frame(height: 70)
+            .frame(height: 62)
+
         }
+        .padding(10)
+        .background(.white.opacity(0.08))
+        .background(.ultraThinMaterial.opacity(0.74))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(.white.opacity(0.20), lineWidth: 1)
+        )
     }
 
-    private func relativeLabel(for date: Date?) -> String {
-        guard let date else { return "--" }
-        let seconds = date.timeIntervalSinceNow
-        if abs(seconds) < 90 { return "Jetzt" }
-        let minutes = Int((seconds / 60).rounded())
-        if abs(minutes) < 60 {
-            return minutes > 0 ? "+\(minutes)m" : "\(minutes)m"
+    private var activeFrameKind: String {
+        guard frames.indices.contains(selectedIndex) else { return "Radar" }
+        return frames[selectedIndex].isForecast ? "Prognose" : "Radar"
+    }
+
+    private static func makeDaySegments(for frames: [RainRadarFrame]) -> [RadarTimelineDaySegment] {
+        guard !frames.isEmpty else { return [] }
+        var segments: [RadarTimelineDaySegment] = []
+        var startIndex = 0
+        var ordinal = 0
+        let calendar = Calendar.current
+
+        for index in frames.indices.dropFirst() {
+            if !calendar.isDate(frames[index].time, inSameDayAs: frames[startIndex].time) {
+                segments.append(
+                    RadarTimelineDaySegment(
+                        startIndex: startIndex,
+                        endIndex: index - 1,
+                        date: frames[startIndex].time,
+                        ordinal: ordinal
+                    )
+                )
+                startIndex = index
+                ordinal += 1
+            }
         }
-        let hours = Int((Double(minutes) / 60).rounded())
-        return hours > 0 ? "+\(hours)h" : "\(hours)h"
+
+        segments.append(
+            RadarTimelineDaySegment(
+                startIndex: startIndex,
+                endIndex: frames.count - 1,
+                date: frames[startIndex].time,
+                ordinal: ordinal
+            )
+        )
+        return segments
+    }
+
+    private func tickHeight(for index: Int) -> CGFloat {
+        if index == selectedIndex { return 22 }
+        return shouldShowLabel(at: index) ? 17 : 10
+    }
+
+    private func shouldShowLabel(at index: Int) -> Bool {
+        guard frames.count > 1 else { return true }
+        if index == 0 || index == maxIndex { return true }
+        if daySegments.contains(where: { $0.startIndex == index }) { return true }
+
+        let date = frames[index].time
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        guard components.minute == 0, let hour = components.hour else { return false }
+        return hour.isMultiple(of: frames.count > 36 ? 6 : 3)
+    }
+
+    private func tickLabel(for index: Int) -> String {
+        guard frames.indices.contains(index) else { return "" }
+        let date = frames[index].time
+        if daySegments.contains(where: { $0.startIndex == index }) {
+            return date.formatted(.dateTime.weekday(.abbreviated).day().month(.twoDigits).locale(.init(identifier: "de_DE")))
+        }
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(.dateTime.hour().minute().locale(.init(identifier: "de_DE")))
+        }
+        return date.formatted(.dateTime.day().month(.twoDigits).locale(.init(identifier: "de_DE")))
+    }
+
+    private func daySegmentWidth(_ segment: RadarTimelineDaySegment, totalWidth: CGFloat) -> CGFloat {
+        let innerWidth = max(1, totalWidth - 24)
+        guard maxIndex > 0 else { return innerWidth }
+        let start = CGFloat(segment.startIndex) / CGFloat(maxIndex)
+        let end = CGFloat(segment.endIndex) / CGFloat(maxIndex)
+        return max(8, (end - start) * innerWidth)
+    }
+
+    private func daySegmentMidX(_ segment: RadarTimelineDaySegment, totalWidth: CGFloat) -> CGFloat {
+        let innerWidth = max(1, totalWidth - 24)
+        guard maxIndex > 0 else { return totalWidth / 2 }
+        let start = CGFloat(segment.startIndex) / CGFloat(maxIndex)
+        let end = CGFloat(segment.endIndex) / CGFloat(maxIndex)
+        return 12 + ((start + end) / 2) * innerWidth
+    }
+
+    private func timelineX(for index: Int, totalWidth: CGFloat) -> CGFloat {
+        let innerWidth = max(1, totalWidth - 24)
+        guard maxIndex > 0 else { return totalWidth / 2 }
+        return 12 + CGFloat(index) / CGFloat(maxIndex) * innerWidth
+    }
+
+    private func daySegmentColor(_ ordinal: Int) -> Color {
+        let colors = [
+            Color(hex: "#73c7ff"),
+            Color(hex: "#9ee8c1"),
+            Color(hex: "#ffd66b"),
+            Color(hex: "#f4a3bf")
+        ]
+        return colors[ordinal % colors.count]
+    }
+}
+
+private struct RadarTimelineDaySegment: Identifiable {
+    let startIndex: Int
+    let endIndex: Int
+    let date: Date
+    let ordinal: Int
+
+    var id: String { "\(startIndex)-\(endIndex)-\(Int(date.timeIntervalSince1970))" }
+
+    func containsSelectedIndex(_ index: Int) -> Bool {
+        index >= startIndex && index <= endIndex
     }
 }
 
