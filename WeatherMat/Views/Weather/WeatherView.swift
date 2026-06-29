@@ -38,7 +38,9 @@ struct WeatherView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 12) {
                 // Top bar with location name + pager dots
-                TopBarView(showLocations: $showLocations)
+                TopBarView(showLocations: $showLocations) {
+                    showRainRadar = true
+                }
                     .padding(.top, 56)
                     .simultaneousGesture(locationSwipeGesture)
 
@@ -57,12 +59,6 @@ struct WeatherView: View {
                 RainBannerView(rain: data.rain)
                     .padding(.horizontal)
                     .simultaneousGesture(locationSwipeGesture)
-
-                RainRadarCardView(location: vm.activeLocation, rain: data.rain) {
-                    showRainRadar = true
-                }
-                .padding(.horizontal)
-                .simultaneousGesture(locationSwipeGesture)
 
                 // Hourly forecast
                 HourlyView(entries: vm.hourlyForActiveView, label: vm.hourlyLabel)

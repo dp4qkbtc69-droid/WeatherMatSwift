@@ -238,7 +238,7 @@ struct RainRadarScreen: View {
         .task(id: viewModel.isPlaying) {
             guard viewModel.isPlaying else { return }
             while viewModel.isPlaying {
-                try? await Task.sleep(nanoseconds: 620_000_000)
+                try? await Task.sleep(nanoseconds: 720_000_000)
                 guard !Task.isCancelled else { return }
                 viewModel.advanceFrame()
             }
@@ -438,7 +438,7 @@ private struct RadarMapRepresentable: UIViewRepresentable {
                 overlay.canReplaceMapContent = false
                 overlay.minimumZ = 3
                 overlay.maximumZ = 22
-                context.coordinator.addRadarOverlay(overlay, id: layerID, to: mapView)
+                context.coordinator.replaceRadarOverlay(with: overlay, id: layerID, in: mapView)
             }
         }
 
@@ -466,79 +466,25 @@ private struct RadarMapRepresentable: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
-        private let radarTargetAlpha: CGFloat = 0.82
-        private var radarOverlays: [(id: String, overlay: MKTileOverlay)] = []
-        private var radarOverlayAlphas: [ObjectIdentifier: CGFloat] = [:]
-        private var radarRenderers: [ObjectIdentifier: MKTileOverlayRenderer] = [:]
+        var radarOverlay: MKTileOverlay?
         var dwdOverlays: [String: MKTileOverlay] = [:]
         var currentLayerID: String?
         var lastAppliedRegionRevision = 0
 
-        func addRadarOverlay(_ overlay: MKTileOverlay, id: String, to mapView: MKMapView) {
+        func replaceRadarOverlay(with overlay: MKTileOverlay, id: String, in mapView: MKMapView) {
+            let oldOverlay = radarOverlay
+            radarOverlay = overlay
             currentLayerID = id
-            radarOverlays.append((id: id, overlay: overlay))
-
-            let overlayID = ObjectIdentifier(overlay)
-            radarOverlayAlphas[overlayID] = radarOverlays.count == 1 ? radarTargetAlpha : 0
             mapView.addOverlay(overlay, level: .aboveLabels)
-
-            animateRadarOverlay(overlay, to: radarTargetAlpha, in: mapView)
-
-            let stale = radarOverlays.dropLast()
-            for item in stale {
-                animateRadarOverlay(item.overlay, to: 0, in: mapView) { [weak mapView, weak self] in
-                    guard let self, let mapView else { return }
-                    mapView.removeOverlay(item.overlay)
-                    let removedID = ObjectIdentifier(item.overlay)
-                    self.radarOverlayAlphas[removedID] = nil
-                    self.radarRenderers[removedID] = nil
-                    self.radarOverlays.removeAll { $0.id == item.id }
-                }
-            }
-        }
-
-        private func animateRadarOverlay(
-            _ overlay: MKTileOverlay,
-            to targetAlpha: CGFloat,
-            in mapView: MKMapView,
-            completion: (() -> Void)? = nil
-        ) {
-            let overlayID = ObjectIdentifier(overlay)
-            let startAlpha = radarOverlayAlphas[overlayID] ?? 0
-            let steps = 12
-            let duration: TimeInterval = 0.32
-
-            for step in 1...steps {
-                let delay = duration / Double(steps) * Double(step)
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak mapView] in
-                    guard let self, let mapView else { return }
-                    let progress = CGFloat(step) / CGFloat(steps)
-                    let eased = 1 - pow(1 - progress, 3)
-                    let alpha = startAlpha + (targetAlpha - startAlpha) * eased
-                    self.radarOverlayAlphas[overlayID] = alpha
-                    if let renderer = self.radarRenderers[overlayID] {
-                        renderer.alpha = alpha
-                        renderer.setNeedsDisplay()
-                    } else {
-                        mapView.setNeedsDisplay()
-                    }
-                    if step == steps {
-                        completion?()
-                    }
-                }
+            if let oldOverlay {
+                mapView.removeOverlay(oldOverlay)
             }
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let tileOverlay = overlay as? MKTileOverlay {
                 let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
-                if tileOverlay is DwdWMSTileOverlay {
-                    renderer.alpha = 0.74
-                } else {
-                    let overlayID = ObjectIdentifier(tileOverlay)
-                    renderer.alpha = radarOverlayAlphas[overlayID] ?? radarTargetAlpha
-                    radarRenderers[overlayID] = renderer
-                }
+                renderer.alpha = tileOverlay is DwdWMSTileOverlay ? 0.74 : 0.82
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
@@ -603,8 +549,9 @@ private final class ClampedRainTileOverlay: MKTileOverlay {
     override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
         let handler = TileResultHandler(result)
         let url = sourceURL(for: path)
+        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 12)
         let maxZoom = sourceMaxZoom
-        URLSession.shared.dataTask(with: url) { data, _, error in
+        URLSession.shared.dataTask(with: request) { data, _, error in
             guard error == nil, let data else {
                 handler.finish(data: nil, error: error)
                 return
@@ -670,8 +617,9 @@ private final class DwdRadarTileOverlay: MKTileOverlay {
     override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
         let handler = TileResultHandler(result)
         let url = sourceURL(for: path)
+        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 12)
         let maxZoom = sourceMaxZoom
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        URLSession.shared.dataTask(with: request) { data, response, error in
             guard error == nil,
                   let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200,

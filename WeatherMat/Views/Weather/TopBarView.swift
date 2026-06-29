@@ -4,6 +4,7 @@ import SwiftUI
 struct TopBarView: View {
     @Environment(WeatherViewModel.self) private var vm
     @Binding var showLocations: Bool
+    let openRainRadar: () -> Void
     @State private var showModelDetails = false
     @State private var showFeedbackDialog = false
 
@@ -83,7 +84,10 @@ struct TopBarView: View {
                         .buttonStyle(.plain)
 
                         if showFeedbackDialog {
-                            WeatherFeedbackPanel { feedback in
+                            WeatherFeedbackPanel(openRainRadar: {
+                                showFeedbackDialog = false
+                                openRainRadar()
+                            }) { feedback in
                                 showFeedbackDialog = false
                                 vm.submitWeatherFeedback(feedback)
                             }
@@ -111,10 +115,45 @@ struct TopBarView: View {
 
 // MARK: - Weather feedback
 private struct WeatherFeedbackPanel: View {
+    let openRainRadar: () -> Void
     let submit: (WeatherFeedback) -> Void
 
     var body: some View {
         VStack(spacing: 8) {
+            Button {
+                HapticService.impact(.light)
+                openRainRadar()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#7dd3fc"))
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Regenradar")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text("Karte öffnen")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.64))
+                    }
+
+                    Spacer(minLength: 6)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .frame(width: 152, height: 54)
+                .padding(.horizontal, 10)
+                .background(Color.black.opacity(0.18))
+                .background(.white.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Regenradar öffnen")
+
             ForEach(WeatherFeedback.quickReportCases) { feedback in
                 Button {
                     HapticService.impact(.light)
