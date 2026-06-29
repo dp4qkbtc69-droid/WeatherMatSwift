@@ -12,7 +12,7 @@ from app import RADAR_BBOX, _download_frames, _render_tile, _tile_lon_lat_bounds
 
 OUTPUT_DIR = Path(os.environ.get("STATIC_RADAR_OUTPUT_DIR", "site"))
 MIN_ZOOM = int(os.environ.get("STATIC_TILE_MIN_Z", "4"))
-MAX_ZOOM = int(os.environ.get("STATIC_TILE_MAX_Z", "8"))
+MAX_ZOOM = int(os.environ.get("STATIC_TILE_MAX_Z", "7"))
 
 
 def main() -> None:

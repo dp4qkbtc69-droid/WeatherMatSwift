@@ -58,9 +58,10 @@ Generated files:
 - `health`
 - `tiles/{frame_id}/{z}/{x}/{y}.png`
 
-The default workflow renders zoom levels `4...8`, then the app upscales/crops
+The default workflow renders zoom levels `4...7`, then the app upscales/crops
 the highest available radar tile for closer zooms. This keeps static hosting
-storage and GitHub Actions runtime reasonable.
+storage and GitHub Actions runtime reasonable enough for the 15-minute refresh
+cadence.
 
 ## Server Deploy With HTTPS
 
