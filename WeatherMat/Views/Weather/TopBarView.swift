@@ -59,6 +59,7 @@ struct TopBarView: View {
                             confidence: data.confidence,
                             activeModels: data.activeModels,
                             agreementPct: data.agreementPct,
+                            confidenceBands: data.confidenceBands,
                             selectedDayIndex: vm.selectedDayIndex,
                             isExpanded: $showModelDetails
                         )
@@ -159,11 +160,31 @@ struct ModelStatusButton: View {
     let confidence:       ConfidenceLevel
     let activeModels:     [String]
     let agreementPct:     Int
+    let confidenceBands:  [ForecastConfidenceBand]
     var selectedDayIndex: Int? = nil
     @Binding var isExpanded: Bool
 
+    private var displayConfidence: ConfidenceLevel {
+        selectedBand?.confidence ?? confidence
+    }
+
+    private var displayAgreementPct: Int {
+        selectedBand?.agreementPct ?? agreementPct
+    }
+
+    private var selectedBand: ForecastConfidenceBand? {
+        let idx = selectedDayIndex ?? 0
+        let id: String
+        switch idx {
+        case 0: id = "0-24h"
+        case 1...3: id = "1-3d"
+        default: id = "3-10d"
+        }
+        return confidenceBands.first { $0.id == id }
+    }
+
     private var statusText: String {
-        switch confidence {
+        switch displayConfidence {
         case .high:   return "Modelle gut"
         case .medium: return "Modelle ok"
         case .low:    return "Modelle unsicher"
@@ -200,10 +221,10 @@ struct ModelStatusButton: View {
                 }
             } label: {
                 HStack(spacing: 7) {
-                    TrafficLightView(level: confidence)
+                    TrafficLightView(level: displayConfidence)
                     Text(statusText)
                         .font(.system(size: 13, weight: .semibold))
-                    Text("\(agreementPct)%")
+                    Text("\(displayAgreementPct)%")
                         .font(.system(size: 13, weight: .bold))
                         .monospacedDigit()
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -223,6 +244,10 @@ struct ModelStatusButton: View {
                     Label(horizonLabel, systemImage: "calendar")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.92))
+
+                    if !confidenceBands.isEmpty {
+                        ConfidenceBandsView(bands: confidenceBands)
+                    }
 
                     Text("Stärkste Modelle: \(dominantLabel)")
                         .font(.system(size: 13, weight: .semibold))
@@ -245,6 +270,35 @@ struct ModelStatusButton: View {
         }
     }
 
+}
+
+
+private struct ConfidenceBandsView: View {
+    let bands: [ForecastConfidenceBand]
+
+    var body: some View {
+        VStack(spacing: 5) {
+            ForEach(bands) { band in
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(band.confidence.color)
+                        .frame(width: 7, height: 7)
+                    Text(band.title)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.84))
+                        .frame(width: 42, alignment: .leading)
+                    Text(band.subtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Spacer()
+                    Text("\(band.agreementPct)%")
+                        .font(.system(size: 11, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.88))
+                }
+            }
+        }
+    }
 }
 
 struct TrafficLightView: View {

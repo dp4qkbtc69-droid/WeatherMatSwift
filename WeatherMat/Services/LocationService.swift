@@ -74,9 +74,9 @@ extension LocationService: CLLocationManagerDelegate {
     }
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         Task { @MainActor in
-            switch manager.authorizationStatus {
+            switch self.manager.authorizationStatus {
             case .authorizedWhenInUse, .authorizedAlways:
-                manager.requestLocation()
+                self.manager.requestLocation()
             case .denied, .restricted:
                 self.finish(with: .failure(WeatherError.unauthorized))
             default:

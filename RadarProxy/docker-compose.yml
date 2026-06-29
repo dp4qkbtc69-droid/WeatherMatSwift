@@ -1,0 +1,35 @@
+services:
+  radar-proxy:
+    build: .
+    restart: unless-stopped
+    environment:
+      DWD_RADAR_PAST_HOURS: "${DWD_RADAR_PAST_HOURS:-24}"
+      DWD_RADAR_PAST_STEP_MINUTES: "${DWD_RADAR_PAST_STEP_MINUTES:-15}"
+      DWD_RADAR_CACHE_SECONDS: "${DWD_RADAR_CACHE_SECONDS:-240}"
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=20).read()"]
+      interval: 5m
+      timeout: 30s
+      retries: 2
+      start_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - radar-proxy
+    environment:
+      RADAR_DOMAIN: "${RADAR_DOMAIN:?Set RADAR_DOMAIN in .env}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

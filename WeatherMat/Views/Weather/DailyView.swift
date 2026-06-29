@@ -4,6 +4,7 @@ import SwiftUI
 struct DailyView: View {
     @Environment(WeatherViewModel.self) private var vm
     let entries: [DailyEntry]
+    var confidenceBands: [ForecastConfidenceBand] = []
 
     @State private var dayRange = 3   // default: 3-day view
 
@@ -32,7 +33,8 @@ struct DailyView: View {
                     isSelected: vm.selectedDayIndex == i,
                     isToday:    i == 0,
                     allLow:     allLow,
-                    allHigh:    allHigh
+                    allHigh:    allHigh,
+                    confidence: confidence(for: i)
                 )
                 .onTapGesture {
                     HapticService.impact(.light)
@@ -50,6 +52,16 @@ struct DailyView: View {
         .background(.white.opacity(0.11))
         .background(.ultraThinMaterial.opacity(0.54))
         .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func confidence(for index: Int) -> ConfidenceLevel? {
+        let id: String
+        switch index {
+        case 0: id = "0-24h"
+        case 1...3: id = "1-3d"
+        default: id = "3-10d"
+        }
+        return confidenceBands.first { $0.id == id }?.confidence
     }
 
     // MARK: - Range picker
@@ -96,6 +108,7 @@ struct DailyRowView: View {
     let isToday:    Bool
     let allLow:     Int
     let allHigh:    Int
+    let confidence: ConfidenceLevel?
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -120,10 +133,18 @@ struct DailyRowView: View {
                 .foregroundStyle(.white)
                 .frame(width: 52, alignment: .leading)
 
-            Image(systemName: day.condition.sfSymbol)
-                .symbolRenderingMode(.multicolor)
-                .font(.system(size: 25))
-                .frame(width: 32)
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: day.condition.sfSymbol)
+                    .symbolRenderingMode(.multicolor)
+                    .font(.system(size: 25))
+                    .frame(width: 32)
+                if let confidence {
+                    Circle()
+                        .fill(confidence.color)
+                        .frame(width: 7, height: 7)
+                        .shadow(color: confidence.color.opacity(0.5), radius: 2)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 metricLine(icon: "drop.fill",

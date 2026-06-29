@@ -135,7 +135,8 @@ def make_icon(variant: str):
     draw_cloud(img, CLOUD_CX, CLOUD_CY, CLOUD_S, cloud_col)
 
     path = os.path.join(OUT, f"icon_{variant}.png")
-    img.save(path, "PNG")
+    # App Store Connect rejects large app icons that contain an alpha channel.
+    img.convert("RGB").save(path, "PNG")
     print(f"  ✓  {path}")
 
 

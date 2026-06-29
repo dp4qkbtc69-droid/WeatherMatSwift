@@ -1,6 +1,7 @@
 // HapticService.swift
 import UIKit
 
+@MainActor
 enum HapticService {
     static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
         UIImpactFeedbackGenerator(style: style).impactOccurred()

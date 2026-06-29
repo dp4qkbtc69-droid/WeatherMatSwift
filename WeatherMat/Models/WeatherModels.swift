@@ -16,8 +16,72 @@ struct CurrentWeather: Codable {
     let isDay:          Bool
     let precipitation:  Double
     let airQuality:     AirQuality?
+    let stationObservation: NetatmoObservation?
+    let stationObservations: [NetatmoObservation]
     let condition:      WMOCondition
     let background:     WeatherBackground
+}
+
+
+// MARK: - Netatmo station
+struct NetatmoObservation: Codable {
+    let stationName: String
+    let moduleName: String
+    let moduleType: String?
+    let measuredAt: Date
+    let temperature: Double?
+    let humidity: Int?
+    let pressure: Double?
+    let co2: Int?
+    let rainRate: Double?
+    let rainToday: Double?
+    let windSpeed: Double?
+    let windGust: Double?
+    let windDirection: Int?
+
+    var ageMinutes: Int {
+        max(0, Int(Date().timeIntervalSince(measuredAt) / 60))
+    }
+
+    var isFresh: Bool {
+        ageMinutes <= 45
+    }
+
+    var ageLabel: String {
+        if ageMinutes < 60 { return "\(ageMinutes) min" }
+        let hours = ageMinutes / 60
+        if hours < 24 { return "\(hours) h" }
+        return "\(hours / 24) d"
+    }
+
+    var displayName: String {
+        if !moduleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return moduleName
+        }
+        switch moduleType {
+        case "NAModule1": return "Außenmodul"
+        case "NAModule2": return "Windmesser"
+        case "NAModule3": return "Regenmesser"
+        case "NAModule4": return "Innenmodul"
+        default: return "Modul"
+        }
+    }
+
+    var sortRank: Int {
+        let normalizedName = displayName
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+        if normalizedName.contains("innen") { return 0 }
+        if normalizedName.contains("galerie") { return 1 }
+        if normalizedName.contains("terrasse") || normalizedName.contains("terasse") { return 2 }
+        if normalizedName.contains("regen") { return 3 }
+        switch moduleType {
+        case "NAModule2": return 4
+        case "NAModule1": return 5
+        case "NAModule4": return 6
+        default: return 7
+        }
+    }
 }
 
 // MARK: - Air Quality
@@ -106,6 +170,15 @@ enum ConfidenceLevel: String, Codable {
         case .low:    return Color(hex: "#fc814a")
         }
     }
+}
+
+
+struct ForecastConfidenceBand: Identifiable, Codable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let agreementPct: Int
+    let confidence: ConfidenceLevel
 }
 
 // MARK: - Weather Background
@@ -207,6 +280,7 @@ struct EnsembleWeatherData: Codable {
     let warnings:     [DWDWarning]
     let agreementPct: Int
     let confidence:   ConfidenceLevel
+    let confidenceBands: [ForecastConfidenceBand]
     let activeModels: [String]
 }
 

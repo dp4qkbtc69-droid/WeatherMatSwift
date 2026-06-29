@@ -69,7 +69,7 @@ extension DailyEntry {
 extension CurrentWeather {
     enum CodingKeys: String, CodingKey {
         case temp, feelsLike, humidity, cloudCover, windSpeed, windDirection
-        case pressure, visibility, uvIndex, isDay, precipitation, airQuality, condition, background
+        case pressure, visibility, uvIndex, isDay, precipitation, airQuality, stationObservation, stationObservations, condition, background
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -85,6 +85,8 @@ extension CurrentWeather {
         isDay         = try  c.decode(Bool.self,              forKey: .isDay)
         precipitation = try  c.decode(Double.self,            forKey: .precipitation)
         airQuality    = try  c.decodeIfPresent(AirQuality.self, forKey: .airQuality)
+        stationObservation = try c.decodeIfPresent(NetatmoObservation.self, forKey: .stationObservation)
+        stationObservations = try c.decodeIfPresent([NetatmoObservation].self, forKey: .stationObservations) ?? stationObservation.map { [$0] } ?? []
         condition     = try  c.decode(WMOCondition.self,       forKey: .condition)
         background    = try  c.decode(WeatherBackground.self,  forKey: .background)
     }
@@ -102,6 +104,8 @@ extension CurrentWeather {
         try c.encode(isDay,         forKey: .isDay)
         try c.encode(precipitation, forKey: .precipitation)
         try c.encodeIfPresent(airQuality, forKey: .airQuality)
+        try c.encodeIfPresent(stationObservation, forKey: .stationObservation)
+        try c.encode(stationObservations, forKey: .stationObservations)
         try c.encode(condition,     forKey: .condition)
         try c.encode(background,    forKey: .background)
     }
@@ -140,7 +144,7 @@ extension RainAnalysis {
 extension EnsembleWeatherData {
     enum CodingKeys: String, CodingKey {
         case current, today, hourly, daily, rain, warnings
-        case agreementPct, confidence, activeModels
+        case agreementPct, confidence, confidenceBands, activeModels
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -152,6 +156,7 @@ extension EnsembleWeatherData {
         warnings     = try c.decode([DWDWarning].self,      forKey: .warnings)
         agreementPct = try c.decode(Int.self,               forKey: .agreementPct)
         confidence   = try c.decode(ConfidenceLevel.self,   forKey: .confidence)
+        confidenceBands = try c.decodeIfPresent([ForecastConfidenceBand].self, forKey: .confidenceBands) ?? []
         activeModels = try c.decode([String].self,          forKey: .activeModels)
     }
     public func encode(to encoder: Encoder) throws {
@@ -164,6 +169,7 @@ extension EnsembleWeatherData {
         try c.encode(warnings,     forKey: .warnings)
         try c.encode(agreementPct, forKey: .agreementPct)
         try c.encode(confidence,   forKey: .confidence)
+        try c.encode(confidenceBands, forKey: .confidenceBands)
         try c.encode(activeModels, forKey: .activeModels)
     }
 }

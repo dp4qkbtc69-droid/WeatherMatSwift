@@ -4,5 +4,11 @@
 <dict>
 	<key>openWeatherMapGeocodingAPIKey</key>
 	<string></string>
+	<key>netatmoClientID</key>
+	<string></string>
+	<key>netatmoClientSecret</key>
+	<string></string>
+	<key>dwdRadarTileBaseURL</key>
+	<string></string>
 </dict>
 </plist>

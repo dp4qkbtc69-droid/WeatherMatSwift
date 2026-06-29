@@ -41,30 +41,33 @@ final class EnsembleService: Sendable {
         async let airQuality = try? await withTimeout(seconds: 6) {
             try await AirQualityService.shared.fetch(for: location)
         }
+        async let stationObservations = try? await withTimeout(seconds: 8) {
+            try await NetatmoService.shared.fetchNearestObservations(for: location)
+        }
 
-        return combine(results: results, location: location, warnings: await warnings, airQuality: await airQuality)
+        return combine(
+            results: results,
+            location: location,
+            warnings: await warnings,
+            airQuality: await airQuality,
+            stationObservations: await stationObservations ?? []
+        )
     }
 
     // MARK: - Ensemble combination
-    private func combine(results: [ModelWeatherData], location: CLLocation, warnings: [DWDWarning], airQuality: AirQuality?) -> EnsembleWeatherData {
+    private func combine(
+        results: [ModelWeatherData],
+        location: CLLocation,
+        warnings: [DWDWarning],
+        airQuality: AirQuality?,
+        stationObservations: [NetatmoObservation]
+    ) -> EnsembleWeatherData {
         guard !results.isEmpty else { return .empty }
 
         let names   = results.map(\.modelName)
         let locationKey = calibrationKey(for: location)
         ForecastCalibrationStore.shared.updateScores(for: locationKey, with: results)
         let weights = calibratedWeights(for: names, locationKey: locationKey)
-
-        // Weighted helper (flat weights for scalar current fields)
-        func wa<T: BinaryFloatingPoint>(_ kp: KeyPath<ModelWeatherData, T>) -> T {
-            results.reduce(0) { $0 + $1[keyPath: kp] * T(weights[$1.modelName] ?? 0) }
-        }
-
-        // condPrimary: used for isDay, humidity, pressure, UV, wind direction
-        // Never ECMWF for current (model run lag up to 12 h)
-        let condPrimary = results.first { $0.modelName == "WeatherKit"     }
-                       ?? results.first { $0.modelName == "OpenMeteo-ICON" }
-                       ?? results.first { $0.modelName == "OpenMeteo"      }
-                       ?? results[0]
 
         // dataPrimary: OpenMeteo provides up to 14 days — always use as array source
         let dataPrimary = results.first { $0.modelName == "OpenMeteo"      }
@@ -74,36 +77,50 @@ final class EnsembleService: Sendable {
 
         let hourly  = consensusHourly(primary: dataPrimary, all: results, baseWeights: weights)
         let daily   = consensusDaily(primary: dataPrimary,  all: results, baseWeights: weights)
-        let agePct  = agreementPct(results: results)
-        let conf: ConfidenceLevel = agePct >= 75 ? .high : agePct >= 45 ? .medium : .low
+        let bands = confidenceBands(results: results)
+        let agePct = bands.first(where: { $0.id == "0-24h" })?.agreementPct ?? agreementPct(results: results)
+        let conf = confidenceLevel(for: agePct)
+        let rainConfidence = bands.first(where: { $0.id == "0-6h" })?.confidence ?? conf
+        let currentWeights = horizonWeights(for: results, base: weights, hoursAhead: 0)
+        let condPrimary = results
+            .filter { $0.modelName != "ECMWF" }
+            .max { (currentWeights[$0.modelName] ?? 0) < (currentWeights[$1.modelName] ?? 0) }
+            ?? results.max { (currentWeights[$0.modelName] ?? 0) < (currentWeights[$1.modelName] ?? 0) }
+            ?? results[0]
 
-        // Weighted average cloud cover (0–100) for cloud-cover correction
+        func currentWA<T: BinaryFloatingPoint>(_ kp: KeyPath<ModelWeatherData, T>) -> T {
+            results.reduce(0) { $0 + $1[keyPath: kp] * T(currentWeights[$1.modelName] ?? 0) }
+        }
+
+        // Weighted average cloud cover (0–100) for cloud-cover correction.
+        // Current values use horizon=0 weights, so near-term sources dominate.
         let cloudCoverW = Int(results.reduce(0.0) { acc, m in
-            acc + Double(m.currentCloudCover) * (weights[m.modelName] ?? 0)
+            acc + Double(m.currentCloudCover) * (currentWeights[m.modelName] ?? 0)
         }.rounded())
 
-        // Current WMO code via weighted vote at horizon=0, corrected by cloud cover
+        // Current WMO code via weighted vote at horizon=0, corrected by cloud cover.
         let currentWMO  = votedCurrentWMO(results: results, baseWeights: weights,
                                           avgCloudCover: cloudCoverW)
-        let currentIsDay = votedBool(results.map { ($0.currentIsDay, weights[$0.modelName] ?? 0) })
+        let currentIsDay = votedBool(results.map { ($0.currentIsDay, currentWeights[$0.modelName] ?? 0) })
         let cond    = WMOCode.condition(for: currentWMO, isDay: currentIsDay)
 
-        let bestMinutely = results.max { $0.minutely.count < $1.minutely.count }?.minutely ?? []
-        let rain = analyzeRain(minutely: bestMinutely, confidence: conf)
+        let rain = analyzeRain(results: results, baseWeights: weights, confidence: rainConfidence)
 
         let current = CurrentWeather(
-            temp:          Int(wa(\.currentTemp).rounded()),
-            feelsLike:     Int(wa(\.currentFeelsLike).rounded()),
+            temp:          Int(currentWA(\.currentTemp).rounded()),
+            feelsLike:     Int(currentWA(\.currentFeelsLike).rounded()),
             humidity:      condPrimary.currentHumidity,
             cloudCover:    cloudCoverW,
-            windSpeed:     Int(wa(\.currentWindSpeed).rounded()),
+            windSpeed:     Int(currentWA(\.currentWindSpeed).rounded()),
             windDirection: condPrimary.currentWindDirection,
-            pressure:      Int(wa(\.currentPressure).rounded()),
-            visibility:    Int(wa(\.currentVisibility).rounded()),
-            uvIndex:       wa(\.currentUVIndex),
+            pressure:      Int(currentWA(\.currentPressure).rounded()),
+            visibility:    Int(currentWA(\.currentVisibility).rounded()),
+            uvIndex:       currentWA(\.currentUVIndex),
             isDay:         currentIsDay,
-            precipitation: wa(\.currentPrecipitation),
+            precipitation: currentWA(\.currentPrecipitation),
             airQuality:    airQuality,
+            stationObservation: stationObservations.preferredCalibrationObservation,
+            stationObservations: stationObservations,
             condition:     cond,
             background:    currentIsDay ? cond.background : .nightClear
         )
@@ -113,6 +130,13 @@ final class EnsembleService: Sendable {
             from: results,
             ensemble: current
         )
+        if let stationObservation = stationObservations.preferredCalibrationObservation {
+            ForecastCalibrationStore.shared.recordStationObservation(
+                for: locationKey,
+                observation: stationObservation,
+                results: results
+            )
+        }
         ForecastCalibrationStore.shared.storeForecasts(for: locationKey, from: results)
 
         return EnsembleWeatherData(
@@ -124,6 +148,7 @@ final class EnsembleService: Sendable {
             warnings:     warnings.sorted { $0.severity > $1.severity },
             agreementPct: agePct,
             confidence:   conf,
+            confidenceBands: bands,
             activeModels: names
         )
     }
@@ -333,15 +358,53 @@ final class EnsembleService: Sendable {
     }
 
     // MARK: - Agreement %
-    /// Computes pairwise MAE over temperature (60%) and precip-prob (40%) for the next 24h.
+    /// Computes pairwise agreement over all common hourly buckets.
     func agreementPct(results: [ModelWeatherData]) -> Int {
+        agreementPct(results: results, allowedBuckets: nil)
+    }
+
+    private func confidenceLevel(for agreementPct: Int) -> ConfidenceLevel {
+        agreementPct >= 75 ? .high : agreementPct >= 45 ? .medium : .low
+    }
+
+    private func confidenceBands(results: [ModelWeatherData]) -> [ForecastConfidenceBand] {
+        let specs: [(String, String, String, Double, Double)] = [
+            ("0-6h", "Jetzt", "0-6 h", 0, 6),
+            ("0-24h", "Heute", "0-24 h", 0, 24),
+            ("1-3d", "Mittel", "1-3 Tage", 24, 72),
+            ("3-10d", "Trend", "3-10 Tage", 72, 240),
+        ]
+        return specs.map { id, title, subtitle, start, end in
+            let pct = agreementPctForHorizon(results: results, fromHour: start, toHour: end)
+            return ForecastConfidenceBand(
+                id: id,
+                title: title,
+                subtitle: subtitle,
+                agreementPct: pct,
+                confidence: confidenceLevel(for: pct)
+            )
+        }
+    }
+
+    private func agreementPctForHorizon(results: [ModelWeatherData], fromHour: Double, toHour: Double) -> Int {
+        let now = Date()
+        let minBucket = Int((now.addingTimeInterval(fromHour * 3_600).timeIntervalSince1970 + 1_800) / 3_600)
+        let maxBucket = Int((now.addingTimeInterval(toHour * 3_600).timeIntervalSince1970 + 1_800) / 3_600)
+        return agreementPct(results: results, allowedBuckets: minBucket...maxBucket)
+    }
+
+    /// Computes pairwise MAE over temperature, precipitation probability, wind and condition class.
+    private func agreementPct(results: [ModelWeatherData], allowedBuckets: ClosedRange<Int>?) -> Int {
         guard results.count >= 2 else { return 70 }
         var diffs: [Double] = []
         let pairs = results.indices.flatMap { i in results.indices.filter { $0 > i }.map { (results[i], results[$0]) } }
         for (a, b) in pairs {
             let aIndex = buildHourlyIndex(a.hourly)
             let bIndex = buildHourlyIndex(b.hourly)
-            let buckets = Array(Set(aIndex.keys).intersection(bIndex.keys)).sorted().prefix(24)
+            let buckets = Set(aIndex.keys)
+                .intersection(bIndex.keys)
+                .filter { bucket in allowedBuckets?.contains(bucket) ?? true }
+                .sorted()
             guard !buckets.isEmpty else { continue }
             let tempMAE = buckets
                 .map { abs((aIndex[$0]?.temp ?? 0) - (bIndex[$0]?.temp ?? 0)) }
@@ -349,13 +412,59 @@ final class EnsembleService: Sendable {
             let precipMAE = buckets
                 .map { abs((aIndex[$0]?.precipProbability ?? 0) - (bIndex[$0]?.precipProbability ?? 0)) }
                 .reduce(0,+) / Double(buckets.count)
-            diffs.append(tempMAE * 0.6 + precipMAE * 0.4 * 0.1)
+            let windMAE = buckets
+                .map { abs((aIndex[$0]?.windSpeed ?? 0) - (bIndex[$0]?.windSpeed ?? 0)) }
+                .reduce(0,+) / Double(buckets.count)
+            let conditionMismatch = buckets
+                .map { ForecastModelRules.skyClass(aIndex[$0]?.wmoCode ?? 3) == ForecastModelRules.skyClass(bIndex[$0]?.wmoCode ?? 3) ? 0.0 : 1.0 }
+                .reduce(0,+) / Double(buckets.count)
+            diffs.append(tempMAE * 0.48 + precipMAE * 0.04 + windMAE * 0.08 + conditionMismatch * 3.0)
         }
         guard !diffs.isEmpty else { return 70 }
         return max(5, min(99, Int((100 - diffs.reduce(0,+) / Double(diffs.count) * 8).rounded())))
     }
 
     // MARK: - Rain analysis
+    private func analyzeRain(results: [ModelWeatherData], baseWeights: [String: Double], confidence: ConfidenceLevel) -> RainAnalysis {
+        let models = results.filter { !$0.minutely.isEmpty }
+        guard !models.isEmpty else {
+            return analyzeRain(minutely: [], confidence: confidence)
+        }
+        let slots = consensusMinutely(models: models, baseWeights: baseWeights)
+        return analyzeRain(minutely: slots, confidence: confidence)
+    }
+
+    private func consensusMinutely(models: [ModelWeatherData], baseWeights: [String: Double]) -> [ModelMinutelyPoint] {
+        let now = Date()
+        let allTimes = Set(models.flatMap { model in
+            model.minutely
+                .filter { $0.time >= now.addingTimeInterval(-900) && $0.time <= now.addingTimeInterval(2 * 3_600) }
+                .map { Int(($0.time.timeIntervalSince1970 + 30) / 60) }
+        })
+        return allTimes.sorted().compactMap { minuteBucket in
+            let time = Date(timeIntervalSince1970: Double(minuteBucket * 60))
+            let hw = horizonWeights(for: models, base: baseWeights, hoursAhead: max(0, time.timeIntervalSince(now) / 3_600))
+            var total = 0.0
+            var precip = 0.0
+            var probability = 0.0
+            for model in models {
+                guard let nearest = nearestMinutelyPoint(in: model.minutely, to: time),
+                      abs(nearest.time.timeIntervalSince(time)) <= 8 * 60,
+                      let weight = hw[model.modelName]
+                else { continue }
+                total += weight
+                precip += nearest.precipMm * weight
+                probability += nearest.precipProbability * weight
+            }
+            guard total > 0 else { return nil }
+            return ModelMinutelyPoint(time: time, precipMm: precip / total, precipProbability: probability / total)
+        }
+    }
+
+    private func nearestMinutelyPoint(in points: [ModelMinutelyPoint], to time: Date) -> ModelMinutelyPoint? {
+        points.min { abs($0.time.timeIntervalSince(time)) < abs($1.time.timeIntervalSince(time)) }
+    }
+
     func analyzeRain(minutely: [ModelMinutelyPoint], confidence: ConfidenceLevel) -> RainAnalysis {
         let sfx: String = confidence == .high ? "" : confidence == .medium ? " (wahrscheinlich)" : " (unsicher)"
         let now = Date()
@@ -456,7 +565,8 @@ extension EnsembleWeatherData {
     static let empty = EnsembleWeatherData(
         current: CurrentWeather(
             temp: 0, feelsLike: 0, humidity: 0, cloudCover: 0, windSpeed: 0, windDirection: 0,
-            pressure: 0, visibility: 0, uvIndex: 0, isDay: true, precipitation: 0, airQuality: nil,
+            pressure: 0, visibility: 0, uvIndex: 0, isDay: true, precipitation: 0,
+            airQuality: nil, stationObservation: nil, stationObservations: [],
             condition: WMOCode.condition(for: 0), background: .sunny),
         today: DailyEntry(date: Date(), condition: WMOCode.condition(for: 0),
                           high: 0, low: 0, precipitationProbability: 0, precipitationSum: 0,
@@ -464,7 +574,7 @@ extension EnsembleWeatherData {
         hourly: [], daily: [],
         rain: RainAnalysis(type: .clear, text: "", sub: "", sfSymbol: "sun.max.fill",
                            confidence: .medium, minutesUntilRain: nil, minutesUntilClear: nil, chart: []),
-        warnings: [], agreementPct: 0, confidence: .medium, activeModels: []
+        warnings: [], agreementPct: 0, confidence: .medium, confidenceBands: [], activeModels: []
     )
 }
 
@@ -612,6 +722,36 @@ final class ForecastCalibrationStore: @unchecked Sendable {
         saveLatestCurrent(latest)
     }
 
+    func recordStationObservation(for locationKey: String, observation: NetatmoObservation, results: [ModelWeatherData]) {
+        let actual = CurrentSnapshot(
+            temp: observation.temperature ?? Double.nan,
+            precipProbability: (observation.rainRate ?? 0) > 0.05 ? 100 : 0,
+            windSpeed: observation.windSpeed ?? Double.nan,
+            wmoClass: (observation.rainRate ?? 0) > 0.05 ? 4 : 2
+        )
+        guard actual.temp.isFinite || actual.windSpeed.isFinite || observation.rainRate != nil else { return }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        var scores = loadScores()
+        var locationScores = scores[locationKey] ?? [:]
+        for model in results {
+            let prediction = CurrentSnapshot(
+                temp: model.currentTemp,
+                precipProbability: model.currentPrecipitation > 0.05 ? 100 : 0,
+                windSpeed: model.currentWindSpeed,
+                wmoClass: ForecastModelRules.skyClass(model.currentWMOCode)
+            )
+            let error = forecastErrorIgnoringMissing(prediction, actual: actual)
+            let score = max(0.70, min(1.25, 1.20 - error / 18.0))
+            let old = locationScores[model.modelName] ?? 1.0
+            locationScores[model.modelName] = old * 0.80 + score * 0.20
+        }
+        scores[locationKey] = locationScores
+        saveScores(scores)
+    }
+
     func recordFeedback(for locationKey: String, feedback: WeatherFeedback) {
         lock.lock()
         defer { lock.unlock() }
@@ -713,6 +853,26 @@ final class ForecastCalibrationStore: @unchecked Sendable {
         return tempError + precipError + windError + conditionError
     }
 
+    private func forecastErrorIgnoringMissing(_ prediction: CurrentSnapshot, actual: CurrentSnapshot) -> Double {
+        var error = 0.0
+        var weight = 0.0
+        if actual.temp.isFinite {
+            error += abs(prediction.temp - actual.temp) * 1.2
+            weight += 1.2
+        }
+        if actual.windSpeed.isFinite {
+            error += abs(prediction.windSpeed - actual.windSpeed) * 0.08
+            weight += 0.08
+        }
+        if actual.precipProbability.isFinite {
+            error += abs(prediction.precipProbability - actual.precipProbability) * 0.04
+            weight += 0.04
+        }
+        error += prediction.wmoClass == actual.wmoClass ? 0 : 2.0
+        weight += 1.0
+        return weight > 0 ? error : 0
+    }
+
     private func pruned(_ samples: [CalibrationSample], now: Date) -> [CalibrationSample] {
         samples.filter { now.timeIntervalSince($0.createdAt) <= maxSampleAge }
     }
@@ -796,5 +956,17 @@ func withTaskTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendabl
         }
     } catch {
         return nil
+    }
+}
+
+
+private extension Array where Element == NetatmoObservation {
+    var preferredCalibrationObservation: NetatmoObservation? {
+        let fresh = filter(\.isFresh)
+        return fresh.first { $0.moduleType == "NAModule1" && $0.temperature != nil } ??
+        fresh.first { $0.temperature != nil && $0.humidity != nil } ??
+        fresh.first { $0.rainRate != nil } ??
+        fresh.first { $0.windSpeed != nil } ??
+        fresh.first
     }
 }

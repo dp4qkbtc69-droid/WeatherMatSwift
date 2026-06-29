@@ -7,6 +7,7 @@ struct WeatherView: View {
 
     @State private var isPullRefreshing = false
     @State private var dragOffset: CGFloat = 0
+    @State private var showRainRadar = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -57,22 +58,40 @@ struct WeatherView: View {
                     .padding(.horizontal)
                     .simultaneousGesture(locationSwipeGesture)
 
+                RainRadarCardView(location: vm.activeLocation, rain: data.rain) {
+                    showRainRadar = true
+                }
+                .padding(.horizontal)
+                .simultaneousGesture(locationSwipeGesture)
+
                 // Hourly forecast
                 HourlyView(entries: vm.hourlyForActiveView, label: vm.hourlyLabel)
 
                 // 7-day daily forecast
-                DailyView(entries: data.daily)
+                DailyView(entries: data.daily, confidenceBands: data.confidenceBands)
                     .padding(.horizontal)
                     .simultaneousGesture(locationSwipeGesture)
+
+                if !data.current.stationObservations.isEmpty {
+                    NetatmoStationPanelView(
+                        observations: data.current.stationObservations,
+                        current: data.current,
+                        selectedDay: vm.selectedDay ?? data.today
+                    )
+                    .padding(.horizontal)
+                    .simultaneousGesture(locationSwipeGesture)
+                }
 
                 Where2GoView()
                     .padding(.horizontal)
                     .simultaneousGesture(locationSwipeGesture)
 
-                // Stats card — collapsed by default, reacts to selected day
-                StatsView(current: data.current, selectedDay: vm.selectedDay ?? data.today)
-                    .padding(.horizontal)
-                    .simultaneousGesture(locationSwipeGesture)
+                // Fallback when no Netatmo station is connected; otherwise details live in the Netatmo card.
+                if data.current.stationObservations.isEmpty {
+                    StatsView(current: data.current, selectedDay: vm.selectedDay ?? data.today)
+                        .padding(.horizontal)
+                        .simultaneousGesture(locationSwipeGesture)
+                }
 
                 Spacer(minLength: 100)
             }
@@ -81,6 +100,9 @@ struct WeatherView: View {
         .scrollIndicators(.hidden)
         .refreshable {
             await vm.refresh()
+        }
+        .fullScreenCover(isPresented: $showRainRadar) {
+            RainRadarScreen(location: vm.activeLocation)
         }
     }
 

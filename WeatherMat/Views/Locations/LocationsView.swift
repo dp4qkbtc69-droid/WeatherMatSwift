@@ -277,6 +277,7 @@ struct SettingsSectionView: View {
     @AppStorage("appTheme") private var themeName: String = AppTheme.system.rawValue
     @State private var showResetCalibrationConfirm = false
     @State private var showClearCacheConfirm = false
+    @State private var isConnectingNetatmo = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -318,6 +319,24 @@ struct SettingsSectionView: View {
             DataSourceStatusView(activeModels: vm.weatherData?.activeModels ?? [])
 
             VStack(spacing: 0) {
+                SettingsActionRow(
+                    icon: "sensor.tag.radiowaves.forward.fill",
+                    title: "Netatmo verbinden",
+                    subtitle: isConnectingNetatmo ? "Anmeldung läuft" : "Station als lokale Messquelle nutzen",
+                    tint: .green
+                ) {
+                    isConnectingNetatmo = true
+                    Task {
+                        defer { Task { @MainActor in isConnectingNetatmo = false } }
+                        try? await NetatmoService.shared.authenticate()
+                        await vm.refresh()
+                    }
+                }
+
+                Divider()
+                    .background(.white.opacity(0.08))
+                    .padding(.leading, 58)
+
                 SettingsActionRow(
                     icon: "arrow.triangle.2.circlepath",
                     title: "Wettercache leeren",
@@ -367,6 +386,7 @@ struct SettingsSectionView: View {
 
 struct DataSourceStatusView: View {
     @AppStorage("weatherKitLastStatus_v1") private var weatherKitLastStatus = ""
+    @AppStorage("netatmoLastStatus_v1") private var netatmoLastStatus = ""
     let activeModels: [String]
 
     private var weatherKitActive: Bool {
@@ -399,6 +419,12 @@ struct DataSourceStatusView: View {
                     title: "Modelle",
                     subtitle: activeModels.isEmpty ? "warte" : "\(activeModels.count) aktiv",
                     tint: activeModels.isEmpty ? .orange : .cyan
+                )
+                StatusPill(
+                    icon: netatmoLastStatus == "aktiv" ? "checkmark.circle.fill" : "sensor.tag.radiowaves.forward.fill",
+                    title: "Netatmo",
+                    subtitle: netatmoLastStatus.isEmpty ? "nicht verbunden" : netatmoLastStatus,
+                    tint: netatmoLastStatus == "aktiv" ? .green : .orange
                 )
             }
         }
