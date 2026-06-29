@@ -117,8 +117,19 @@ struct DailyRowView: View {
         return f
     }()
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "dd.MM."
+        return f
+    }()
+
     private var dayLabel: String {
         isToday ? "Heute" : Self.dayFormatter.string(from: day.date)
+    }
+
+    private var dateLabel: String {
+        Self.dateFormatter.string(from: day.date)
     }
 
     var body: some View {
@@ -128,10 +139,20 @@ struct DailyRowView: View {
                 .foregroundStyle(isSelected ? Color(hex: "#ffd166") : Color.white.opacity(0.28))
                 .frame(width: 17)
 
-            Text(dayLabel)
-                .font(.system(size: 17, weight: isSelected || isToday ? .bold : .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 52, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(dayLabel)
+                    .font(.system(size: 16, weight: isSelected || isToday ? .bold : .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                Text(dateLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .frame(width: 58, alignment: .leading)
 
             ZStack(alignment: .bottomTrailing) {
                 Image(systemName: day.condition.sfSymbol)
