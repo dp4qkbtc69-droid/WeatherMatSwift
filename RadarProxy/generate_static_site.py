@@ -1,13 +1,26 @@
 from __future__ import annotations
 
+import bz2
+import io
 import json
 import os
 import shutil
-from datetime import datetime, timezone
+import tarfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Dict, Iterable, Tuple
 
-from app import RADAR_BBOX, _download_frames, _render_tile, _tile_lon_lat_bounds
+from app import (
+    PAST_HOURS,
+    RADAR_BBOX,
+    _download_archive,
+    _extract_frames,
+    _parse_frame,
+    _recent_archive_urls,
+    _render_tile,
+    _tile_lon_lat_bounds,
+    RadarFrame,
+)
 
 
 OUTPUT_DIR = Path(os.environ.get("STATIC_RADAR_OUTPUT_DIR", "site"))
@@ -16,7 +29,7 @@ MAX_ZOOM = int(os.environ.get("STATIC_TILE_MAX_Z", "7"))
 
 
 def main() -> None:
-    frames = _download_frames()
+    frames = _download_static_frames()
     if OUTPUT_DIR.exists():
         shutil.rmtree(OUTPUT_DIR)
     (OUTPUT_DIR / "tiles").mkdir(parents=True, exist_ok=True)
@@ -53,6 +66,55 @@ def main() -> None:
             tile_count += 1
 
     print(f"Generated {len(frames)} frames and {tile_count} tiles in {OUTPUT_DIR}")
+
+
+def _download_static_frames() -> list[RadarFrame]:
+    latest_frames = _extract_frames(_download_archive_from_latest())
+    latest_base = latest_frames[0].time if latest_frames else datetime.now(timezone.utc)
+
+    observed_by_time: Dict[datetime, RadarFrame] = {}
+    for url in _recent_archive_urls(latest_base):
+        try:
+            frame = _extract_observed_frame(_download_archive(url))
+        except Exception as error:
+            print(f"[DWD] skipping {url}: {error}", flush=True)
+            continue
+        if frame is not None and frame.time >= latest_base - timedelta(hours=PAST_HOURS):
+            observed_by_time[frame.time] = frame
+
+    for frame in latest_frames:
+        if not frame.is_forecast:
+            observed_by_time[frame.time] = frame
+
+    combined = sorted(observed_by_time.values(), key=lambda item: item.time)
+    combined.extend(frame for frame in latest_frames if frame.is_forecast)
+    if not combined:
+        raise RuntimeError("DWD radar archive contained no usable frames")
+    print(f"Selected {len(combined)} static frames", flush=True)
+    return combined
+
+
+def _download_archive_from_latest() -> bytes:
+    from app import DWD_RV_URL
+
+    return _download_archive(DWD_RV_URL)
+
+
+def _extract_observed_frame(archive: bytes) -> RadarFrame | None:
+    with tarfile.open(fileobj=io.BytesIO(bz2.decompress(archive)), mode="r:") as tar:
+        for member in sorted(tar.getmembers(), key=lambda item: item.name):
+            if not member.isfile() or not _is_observed_member(member.name):
+                continue
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                continue
+            return _parse_frame(Path(member.name).name, extracted.read())
+    return None
+
+
+def _is_observed_member(name: str) -> bool:
+    parts = Path(name).name.split("_")
+    return len(parts) >= 3 and parts[2].isdigit() and int(parts[2]) == 0
 
 
 def _tile_paths_for_bbox(bbox: Tuple[float, float, float, float], min_zoom: int, max_zoom: int) -> Iterable[Tuple[int, int, int]]:
