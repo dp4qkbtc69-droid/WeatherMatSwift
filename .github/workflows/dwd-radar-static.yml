@@ -40,7 +40,7 @@ jobs:
           STATIC_TILE_MIN_Z: "4"
           STATIC_TILE_MAX_Z: "7"
           DWD_RADAR_PAST_HOURS: "24"
-          DWD_RADAR_PAST_STEP_MINUTES: "15"
+          DWD_RADAR_PAST_STEP_MINUTES: "60"
         run: python generate_static_site.py
 
       - name: Upload Pages artifact

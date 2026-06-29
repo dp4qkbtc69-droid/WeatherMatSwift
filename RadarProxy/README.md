@@ -63,6 +63,11 @@ the highest available radar tile for closer zooms. This keeps static hosting
 storage and GitHub Actions runtime reasonable enough for the 15-minute refresh
 cadence.
 
+For the serverless build the past 24 hours are sampled hourly, while the current
+DWD package keeps the recent/nowcast frames denser. Rendering every past
+15-minute archive on every scheduled GitHub Actions run is too heavy for a free
+static Pages setup.
+
 ## Server Deploy With HTTPS
 
 Recommended target: a small VPS with Docker and Docker Compose. Point a DNS
