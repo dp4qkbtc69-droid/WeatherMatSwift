@@ -29,8 +29,8 @@ CACHE_SECONDS = int(os.environ.get("DWD_RADAR_CACHE_SECONDS", "240"))
 PAST_HOURS = int(os.environ.get("DWD_RADAR_PAST_HOURS", "24"))
 PAST_STEP_MINUTES = int(os.environ.get("DWD_RADAR_PAST_STEP_MINUTES", "15"))
 TILE_SIZE = 512
-GRID_WIDTH = 1200
-GRID_HEIGHT = 1100
+GRID_WIDTH = 1100
+GRID_HEIGHT = 1200
 
 # Practical coverage of the DE1200 composite for a MapKit overlay. The official
 # RADOLAN projection is polar stereographic; for app-sized radar inspection this
@@ -246,7 +246,7 @@ def _render_radar_image(grid: np.ndarray) -> Image.Image:
 
     positive = values[values > 0]
     nodata_value = int(np.bincount(positive).argmax()) if positive.size else -1
-    valid = (values > 0) & (raw_values != nodata_value) & (values < 4090)
+    valid = (values > 0) & (values != nodata_value) & (values < 4090)
 
     rgba = np.zeros((GRID_HEIGHT, GRID_WIDTH, 4), dtype=np.uint8)
     intensity = np.zeros_like(values, dtype=np.float32)
