@@ -430,7 +430,8 @@ private struct RadarMapRepresentable: UIViewRepresentable {
         }
 
         if let host, let frame {
-            let layerID = "\(host)\(frame.path)"
+            let source = source ?? .dwd
+            let layerID = "\(host)-\(source)-\(tileMaxZoom ?? 0)"
             if context.coordinator.currentLayerID != layerID {
                 let overlay: MKTileOverlay = source == .dwd
                     ? DwdRadarTileOverlay(host: host, framePath: frame.path, sourceMaxZoom: tileMaxZoom ?? 8)
@@ -439,6 +440,8 @@ private struct RadarMapRepresentable: UIViewRepresentable {
                 overlay.minimumZ = 3
                 overlay.maximumZ = 22
                 context.coordinator.replaceRadarOverlay(with: overlay, id: layerID, in: mapView)
+            } else if context.coordinator.updateRadarOverlay(framePath: frame.path, sourceMaxZoom: tileMaxZoom ?? 8) {
+                context.coordinator.radarRenderer?.reloadData()
             }
         }
 
@@ -467,6 +470,7 @@ private struct RadarMapRepresentable: UIViewRepresentable {
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         var radarOverlay: MKTileOverlay?
+        var radarRenderer: MKTileOverlayRenderer?
         var dwdOverlays: [String: MKTileOverlay] = [:]
         var currentLayerID: String?
         var lastAppliedRegionRevision = 0
@@ -474,6 +478,7 @@ private struct RadarMapRepresentable: UIViewRepresentable {
         func replaceRadarOverlay(with overlay: MKTileOverlay, id: String, in mapView: MKMapView) {
             let oldOverlay = radarOverlay
             radarOverlay = overlay
+            radarRenderer = nil
             currentLayerID = id
             mapView.addOverlay(overlay, level: .aboveLabels)
             if let oldOverlay {
@@ -481,10 +486,23 @@ private struct RadarMapRepresentable: UIViewRepresentable {
             }
         }
 
+        func updateRadarOverlay(framePath: String, sourceMaxZoom: Int) -> Bool {
+            if let overlay = radarOverlay as? DwdRadarTileOverlay {
+                return overlay.update(framePath: framePath, sourceMaxZoom: sourceMaxZoom)
+            }
+            if let overlay = radarOverlay as? ClampedRainTileOverlay {
+                return overlay.update(framePath: framePath)
+            }
+            return false
+        }
+
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let tileOverlay = overlay as? MKTileOverlay {
                 let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
                 renderer.alpha = tileOverlay is DwdWMSTileOverlay ? 0.74 : 0.82
+                if tileOverlay === radarOverlay {
+                    radarRenderer = renderer
+                }
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
@@ -532,7 +550,7 @@ private struct RadarRoundButton: View {
 
 private final class ClampedRainTileOverlay: MKTileOverlay {
     private let host: String
-    private let framePath: String
+    private var framePath: String
     private let sourceMaxZoom = 9
 
     init(host: String, framePath: String) {
@@ -540,6 +558,12 @@ private final class ClampedRainTileOverlay: MKTileOverlay {
         self.framePath = framePath
         super.init(urlTemplate: nil)
         tileSize = CGSize(width: 512, height: 512)
+    }
+
+    func update(framePath: String) -> Bool {
+        guard self.framePath != framePath else { return false }
+        self.framePath = framePath
+        return true
     }
 
     override func url(forTilePath path: MKTileOverlayPath) -> URL {
@@ -599,8 +623,8 @@ private final class ClampedRainTileOverlay: MKTileOverlay {
 
 private final class DwdRadarTileOverlay: MKTileOverlay {
     private let host: String
-    private let framePath: String
-    private let sourceMaxZoom: Int
+    private var framePath: String
+    private var sourceMaxZoom: Int
 
     init(host: String, framePath: String, sourceMaxZoom: Int) {
         self.host = host
@@ -608,6 +632,13 @@ private final class DwdRadarTileOverlay: MKTileOverlay {
         self.sourceMaxZoom = sourceMaxZoom
         super.init(urlTemplate: nil)
         tileSize = CGSize(width: 512, height: 512)
+    }
+
+    func update(framePath: String, sourceMaxZoom: Int) -> Bool {
+        let changed = self.framePath != framePath || self.sourceMaxZoom != sourceMaxZoom
+        self.framePath = framePath
+        self.sourceMaxZoom = sourceMaxZoom
+        return changed
     }
 
     override func url(forTilePath path: MKTileOverlayPath) -> URL {
