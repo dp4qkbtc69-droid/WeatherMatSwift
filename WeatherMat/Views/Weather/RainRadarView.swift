@@ -80,7 +80,17 @@ private final class RainRadarViewModel {
     }
 
     private func appendIconEuFrames(to radarTimeline: RainRadarTimeline) async {
-        guard let meta = try? await DwdIconForecastService.fetchForecastMeta() else { return }
+        let cached = DwdIconForecastService.loadFromCache()
+        if let cached { applyIconEuMeta(cached, to: radarTimeline) }
+
+        guard let fresh = try? await DwdIconForecastService.fetchForecastMeta() else { return }
+        DwdIconForecastService.saveToCache(fresh.layerName)
+        if fresh.layerName != cached?.layerName {
+            applyIconEuMeta(fresh, to: radarTimeline)
+        }
+    }
+
+    private func applyIconEuMeta(_ meta: DwdIconForecastService.ForecastMeta, to radarTimeline: RainRadarTimeline) {
         let radarEnd = radarTimeline.latestObservedFrame?.time ?? Date()
         let cutoff = radarEnd.addingTimeInterval(1800)
         let iconFrames = meta.availableTimes
@@ -384,8 +394,7 @@ struct RainRadarScreen: View {
                         set: { viewModel.isPlaying = $0 }
                     ),
                     selectedTimeLabel: viewModel.selectedTimeLabel,
-                    selectedDateLabel: viewModel.selectedDateLabel,
-                    rangeLabel: viewModel.availableRangeLabel
+                    selectedDateLabel: viewModel.selectedDateLabel
                 )
 
                 HStack {
@@ -1021,17 +1030,26 @@ private final class DwdWMSTileOverlay: MKTileOverlay {
     }
 }
 
+private struct DayBucket: Identifiable {
+    let id: String
+    let label: String
+    let shortLabel: String
+    let globalStartIndex: Int
+    let globalEndIndex: Int
+    var range: ClosedRange<Int> { globalStartIndex...globalEndIndex }
+    func contains(_ index: Int) -> Bool { index >= globalStartIndex && index <= globalEndIndex }
+}
+
 private struct RainRadarTimelineControl: View {
     let frames: [RainRadarFrame]
     @Binding var selectedIndex: Int
     @Binding var isPlaying: Bool
     let selectedTimeLabel: String
     let selectedDateLabel: String
-    let rangeLabel: String
-    private let daySegments: [RadarTimelineDaySegment]
-    private let forecastStartIndex: Int?
-    private let iconEuStartIndex: Int?
 
+    @State private var activeBucketIndex = 0
+
+    private let dayBuckets: [DayBucket]
     private var maxIndex: Int { max(frames.count - 1, 0) }
 
     init(
@@ -1039,29 +1057,45 @@ private struct RainRadarTimelineControl: View {
         selectedIndex: Binding<Int>,
         isPlaying: Binding<Bool>,
         selectedTimeLabel: String,
-        selectedDateLabel: String,
-        rangeLabel: String
+        selectedDateLabel: String
     ) {
         self.frames = frames
         _selectedIndex = selectedIndex
         _isPlaying = isPlaying
         self.selectedTimeLabel = selectedTimeLabel
         self.selectedDateLabel = selectedDateLabel
-        self.rangeLabel = rangeLabel
-        daySegments = Self.makeDaySegments(for: frames)
-        forecastStartIndex = frames.firstIndex(where: \.isForecast)
-        iconEuStartIndex = frames.firstIndex(where: {
+        dayBuckets = Self.makeDayBuckets(for: frames)
+    }
+
+    private var activeBucket: DayBucket? {
+        dayBuckets.indices.contains(activeBucketIndex) ? dayBuckets[activeBucketIndex] : nil
+    }
+
+    private var displayedFrames: [RainRadarFrame] {
+        guard let b = activeBucket else { return frames }
+        return Array(frames[b.range])
+    }
+
+    private var displayedMaxIndex: Int { max(displayedFrames.count - 1, 0) }
+
+    private var localSelectedIndex: Int {
+        guard let b = activeBucket else { return min(selectedIndex, maxIndex) }
+        return max(0, min(selectedIndex - b.globalStartIndex, displayedMaxIndex))
+    }
+
+    private var localForecastStart: Int? { displayedFrames.firstIndex(where: \.isForecast) }
+
+    private var localIconEuStart: Int? {
+        displayedFrames.firstIndex(where: {
             if case .dwdIconEu = $0.frameSource { return true }
             return false
         })
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             HStack(spacing: 10) {
-                Button {
-                    isPlaying.toggle()
-                } label: {
+                Button { isPlaying.toggle() } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(Color(hex: "#5f4500"))
@@ -1069,10 +1103,7 @@ private struct RainRadarTimelineControl: View {
                         .background(.white.opacity(0.84))
                         .background(.ultraThinMaterial)
                         .clipShape(Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(.white.opacity(0.58), lineWidth: 1)
-                        )
+                        .overlay(Circle().stroke(.white.opacity(0.58), lineWidth: 1))
                         .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 5)
                 }
                 .buttonStyle(.plain)
@@ -1084,10 +1115,6 @@ private struct RainRadarTimelineControl: View {
                     Text(selectedDateLabel)
                         .font(.system(size: 12, weight: .bold))
                         .lineLimit(1)
-                    Text(rangeLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.68))
-                        .lineLimit(1)
                 }
 
                 Spacer()
@@ -1095,107 +1122,108 @@ private struct RainRadarTimelineControl: View {
                 Text(activeFrameKind)
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white.opacity(0.88))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(.white.opacity(0.16))
                     .background(.ultraThinMaterial.opacity(0.75))
                     .clipShape(Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(.white.opacity(0.24), lineWidth: 1)
-                    )
+                    .overlay(Capsule().stroke(.white.opacity(0.24), lineWidth: 1))
                     .lineLimit(1)
             }
             .foregroundStyle(.white)
 
+            // Day tab selector
+            if dayBuckets.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(dayBuckets.enumerated()), id: \.element.id) { i, bucket in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) { activeBucketIndex = i }
+                                if !bucket.contains(selectedIndex) {
+                                    selectedIndex = bucket.globalStartIndex
+                                }
+                            } label: {
+                                Text(bucket.shortLabel)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(i == activeBucketIndex
+                                        ? Color(hex: "#5f4500") : .white.opacity(0.82))
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background(i == activeBucketIndex
+                                        ? Color(hex: "#ffd166") : Color.white.opacity(0.13))
+                                    .clipShape(Capsule())
+                                    .overlay(
+                                        Capsule().stroke(.white.opacity(i == activeBucketIndex ? 0 : 0.22), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+            }
+
+            // Scrubber (operates on displayedFrames only)
             GeometryReader { proxy in
                 let width = max(1, proxy.size.width)
-                let progress = maxIndex == 0 ? 0 : CGFloat(selectedIndex) / CGFloat(maxIndex)
+                let progress = displayedMaxIndex == 0 ? 0.0
+                    : CGFloat(localSelectedIndex) / CGFloat(displayedMaxIndex)
                 let knobX = min(max(progress * width, 12), width - 12)
 
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 18)
                         .fill(.white.opacity(0.10))
                         .background(.ultraThinMaterial.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18)
-                                .stroke(.white.opacity(0.24), lineWidth: 1)
-                        )
+                        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.24), lineWidth: 1))
                         .overlay(alignment: .top) {
                             RoundedRectangle(cornerRadius: 18)
                                 .fill(.white.opacity(0.18))
                                 .frame(height: 1)
-                                .padding(.horizontal, 12)
-                                .padding(.top, 1)
+                                .padding(.horizontal, 12).padding(.top, 1)
                         }
 
-                    ForEach(daySegments) { segment in
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(daySegmentColor(segment.ordinal).opacity(segment.containsSelectedIndex(selectedIndex) ? 0.26 : 0.15))
-                            .frame(width: daySegmentWidth(segment, totalWidth: width), height: 32)
-                            .position(x: daySegmentMidX(segment, totalWidth: width), y: 35)
-                    }
-
                     ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.20)).frame(height: 7)
                         Capsule()
-                            .fill(.white.opacity(0.20))
-                            .frame(height: 7)
-
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.88), .white.opacity(0.46)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                            .fill(LinearGradient(
+                                colors: [.white.opacity(0.88), .white.opacity(0.46)],
+                                startPoint: .top, endPoint: .bottom))
                             .frame(width: max(8, knobX), height: 7)
                     }
-                    .padding(.horizontal, 12)
-                    .offset(y: 20)
+                    .padding(.horizontal, 12).offset(y: 20)
 
-                    if let forecastStartIndex {
-                        let forecastX = timelineX(for: forecastStartIndex, totalWidth: width)
-                        Rectangle()
-                            .fill(Color(hex: "#ffd166").opacity(0.88))
-                            .frame(width: 2, height: 43)
-                            .position(x: forecastX, y: 36)
-
+                    if let localForecastStart {
+                        let fx = tlX(localForecastStart, width)
+                        Rectangle().fill(Color(hex: "#ffd166").opacity(0.88))
+                            .frame(width: 2, height: 43).position(x: fx, y: 36)
                         Text("Prognose")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(Color(hex: "#5f4500"))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
                             .background(Color(hex: "#ffd166").opacity(0.94))
                             .clipShape(Capsule())
-                            .position(x: min(max(forecastX + 34, 42), width - 42), y: 49)
+                            .position(x: min(max(fx + 34, 42), width - 42), y: 49)
                     }
 
-                    if let iconEuStartIndex {
-                        let iconX = timelineX(for: iconEuStartIndex, totalWidth: width)
-                        Rectangle()
-                            .fill(Color(hex: "#9ee8c1").opacity(0.88))
-                            .frame(width: 2, height: 43)
-                            .position(x: iconX, y: 36)
-
+                    if let localIconEuStart {
+                        let ix = tlX(localIconEuStart, width)
+                        Rectangle().fill(Color(hex: "#9ee8c1").opacity(0.88))
+                            .frame(width: 2, height: 43).position(x: ix, y: 36)
                         Text("ICON-EU")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(Color(hex: "#1a4d35"))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
                             .background(Color(hex: "#9ee8c1").opacity(0.94))
                             .clipShape(Capsule())
-                            .position(x: min(max(iconX + 38, 46), width - 46), y: 49)
+                            .position(x: min(max(ix + 38, 46), width - 46), y: 49)
                     }
 
                     HStack(alignment: .top, spacing: 0) {
-                        ForEach(frames.indices, id: \.self) { index in
+                        ForEach(displayedFrames.indices, id: \.self) { li in
                             VStack(spacing: 4) {
                                 RoundedRectangle(cornerRadius: 1)
-                                    .fill(.white.opacity(index == selectedIndex ? 1 : 0.58))
-                                    .frame(width: 2, height: tickHeight(for: index))
-                                if shouldShowLabel(at: index) {
-                                    Text(tickLabel(for: index))
+                                    .fill(.white.opacity(li == localSelectedIndex ? 1 : 0.58))
+                                    .frame(width: 2, height: tickH(li))
+                                if showLbl(li) {
+                                    Text(tickLbl(li))
                                         .font(.system(size: 10, weight: .semibold))
                                         .foregroundStyle(.white.opacity(0.74))
                                         .lineLimit(1)
@@ -1205,61 +1233,48 @@ private struct RainRadarTimelineControl: View {
                             .frame(maxWidth: .infinity)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .offset(y: 2)
+                    .padding(.horizontal, 12).offset(y: 2)
 
                     ZStack {
                         Circle()
                             .fill(.white.opacity(0.22))
                             .background(.ultraThinMaterial, in: Circle())
                             .frame(width: 32, height: 32)
-                            .overlay(
-                                Circle()
-                                    .stroke(.white.opacity(0.70), lineWidth: 1)
-                            )
+                            .overlay(Circle().stroke(.white.opacity(0.70), lineWidth: 1))
                             .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
                         Circle()
-                            .fill(Color(hex: "#ffd166"))
-                            .frame(width: 18, height: 18)
-                            .overlay(
-                                Circle()
-                                    .stroke(.white.opacity(0.90), lineWidth: 2)
-                            )
+                            .fill(Color(hex: "#ffd166")).frame(width: 18, height: 18)
+                            .overlay(Circle().stroke(.white.opacity(0.90), lineWidth: 2))
                     }
                     .position(x: knobX, y: 23)
 
                     Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(hex: "#ffd166"), Color(hex: "#ffd166").opacity(0.18)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 2, height: 40)
-                        .position(x: knobX, y: 45)
+                        .fill(LinearGradient(
+                            colors: [Color(hex: "#ffd166"), Color(hex: "#ffd166").opacity(0.18)],
+                            startPoint: .top, endPoint: .bottom))
+                        .frame(width: 2, height: 40).position(x: knobX, y: 45)
                 }
                 .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            let clampedX = min(max(value.location.x, 0), width)
-                            let nextIndex = Int((clampedX / width * CGFloat(maxIndex)).rounded())
-                            selectedIndex = min(max(nextIndex, 0), maxIndex)
-                        }
-                )
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    let clampedX = min(max(value.location.x, 0), width)
+                    let li = Int((clampedX / width * CGFloat(displayedMaxIndex)).rounded())
+                    let gi = (activeBucket?.globalStartIndex ?? 0) + li
+                    selectedIndex = min(max(gi, 0), maxIndex)
+                })
             }
             .frame(height: 62)
-
         }
         .padding(10)
         .background(.white.opacity(0.08))
         .background(.ultraThinMaterial.opacity(0.74))
         .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(.white.opacity(0.20), lineWidth: 1)
-        )
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.20), lineWidth: 1))
+        .onChange(of: selectedIndex) { _, newIndex in
+            let nb = dayBuckets.firstIndex(where: { $0.contains(newIndex) }) ?? 0
+            if nb != activeBucketIndex {
+                withAnimation(.easeInOut(duration: 0.18)) { activeBucketIndex = nb }
+            }
+        }
     }
 
     private var activeFrameKind: String {
@@ -1267,110 +1282,65 @@ private struct RainRadarTimelineControl: View {
         return frames[selectedIndex].isForecast ? "Prognose" : "Radar"
     }
 
-    private static func makeDaySegments(for frames: [RainRadarFrame]) -> [RadarTimelineDaySegment] {
-        guard !frames.isEmpty else { return [] }
-        var segments: [RadarTimelineDaySegment] = []
-        var startIndex = 0
-        var ordinal = 0
-        let calendar = Calendar.current
-
-        for index in frames.indices.dropFirst() {
-            if !calendar.isDate(frames[index].time, inSameDayAs: frames[startIndex].time) {
-                segments.append(
-                    RadarTimelineDaySegment(
-                        startIndex: startIndex,
-                        endIndex: index - 1,
-                        date: frames[startIndex].time,
-                        ordinal: ordinal
-                    )
-                )
-                startIndex = index
-                ordinal += 1
-            }
-        }
-
-        segments.append(
-            RadarTimelineDaySegment(
-                startIndex: startIndex,
-                endIndex: frames.count - 1,
-                date: frames[startIndex].time,
-                ordinal: ordinal
-            )
-        )
-        return segments
+    private func tlX(_ index: Int, _ width: CGFloat) -> CGFloat {
+        let inner = max(1, width - 24)
+        guard displayedMaxIndex > 0 else { return width / 2 }
+        return 12 + CGFloat(index) / CGFloat(displayedMaxIndex) * inner
     }
 
-    private func tickHeight(for index: Int) -> CGFloat {
-        if index == selectedIndex { return 22 }
-        return shouldShowLabel(at: index) ? 17 : 10
+    private func tickH(_ index: Int) -> CGFloat {
+        index == localSelectedIndex ? 22 : (showLbl(index) ? 17 : 10)
     }
 
-    private func shouldShowLabel(at index: Int) -> Bool {
-        guard frames.count > 1 else { return true }
-        if index == 0 || index == maxIndex { return true }
-        if daySegments.contains(where: { $0.startIndex == index }) { return true }
-
-        let date = frames[index].time
-        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-        guard components.minute == 0, let hour = components.hour else { return false }
-        return hour.isMultiple(of: frames.count > 36 ? 6 : 3)
+    private func showLbl(_ index: Int) -> Bool {
+        guard displayedFrames.count > 1 else { return true }
+        if index == 0 || index == displayedMaxIndex { return true }
+        let date = displayedFrames[index].time
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        guard c.minute == 0, let h = c.hour else { return false }
+        let step = displayedFrames.count > 36 ? 6 : (displayedFrames.count > 12 ? 3 : 1)
+        return h.isMultiple(of: step)
     }
 
-    private func tickLabel(for index: Int) -> String {
-        guard frames.indices.contains(index) else { return "" }
-        let date = frames[index].time
-        if daySegments.contains(where: { $0.startIndex == index }) {
-            return date.formatted(.dateTime.weekday(.abbreviated).day().month(.twoDigits).locale(.init(identifier: "de_DE")))
-        }
+    private func tickLbl(_ index: Int) -> String {
+        guard displayedFrames.indices.contains(index) else { return "" }
+        let date = displayedFrames[index].time
         if Calendar.current.isDateInToday(date) {
             return date.formatted(.dateTime.hour().minute().locale(.init(identifier: "de_DE")))
         }
         return date.formatted(.dateTime.day().month(.twoDigits).locale(.init(identifier: "de_DE")))
     }
 
-    private func daySegmentWidth(_ segment: RadarTimelineDaySegment, totalWidth: CGFloat) -> CGFloat {
-        let innerWidth = max(1, totalWidth - 24)
-        guard maxIndex > 0 else { return innerWidth }
-        let start = CGFloat(segment.startIndex) / CGFloat(maxIndex)
-        let end = CGFloat(segment.endIndex) / CGFloat(maxIndex)
-        return max(8, (end - start) * innerWidth)
+    private static func makeDayBuckets(for frames: [RainRadarFrame]) -> [DayBucket] {
+        guard !frames.isEmpty else { return [] }
+        var result: [DayBucket] = []
+        var segStart = 0
+        let cal = Calendar.current
+        for i in frames.indices.dropFirst() {
+            if !cal.isDate(frames[i].time, inSameDayAs: frames[segStart].time) {
+                result.append(makeBucket(from: segStart, to: i - 1, frames: frames, cal: cal))
+                segStart = i
+            }
+        }
+        result.append(makeBucket(from: segStart, to: frames.count - 1, frames: frames, cal: cal))
+        return result
     }
 
-    private func daySegmentMidX(_ segment: RadarTimelineDaySegment, totalWidth: CGFloat) -> CGFloat {
-        let innerWidth = max(1, totalWidth - 24)
-        guard maxIndex > 0 else { return totalWidth / 2 }
-        let start = CGFloat(segment.startIndex) / CGFloat(maxIndex)
-        let end = CGFloat(segment.endIndex) / CGFloat(maxIndex)
-        return 12 + ((start + end) / 2) * innerWidth
-    }
-
-    private func timelineX(for index: Int, totalWidth: CGFloat) -> CGFloat {
-        let innerWidth = max(1, totalWidth - 24)
-        guard maxIndex > 0 else { return totalWidth / 2 }
-        return 12 + CGFloat(index) / CGFloat(maxIndex) * innerWidth
-    }
-
-    private func daySegmentColor(_ ordinal: Int) -> Color {
-        let colors = [
-            Color(hex: "#73c7ff"),
-            Color(hex: "#9ee8c1"),
-            Color(hex: "#ffd66b"),
-            Color(hex: "#f4a3bf")
-        ]
-        return colors[ordinal % colors.count]
-    }
-}
-
-private struct RadarTimelineDaySegment: Identifiable {
-    let startIndex: Int
-    let endIndex: Int
-    let date: Date
-    let ordinal: Int
-
-    var id: String { "\(startIndex)-\(endIndex)-\(Int(date.timeIntervalSince1970))" }
-
-    func containsSelectedIndex(_ index: Int) -> Bool {
-        index >= startIndex && index <= endIndex
+    private static func makeBucket(from start: Int, to end: Int, frames: [RainRadarFrame], cal: Calendar) -> DayBucket {
+        let date = frames[start].time
+        let locale = Locale(identifier: "de_DE")
+        let short: String
+        let long: String
+        if cal.isDateInToday(date) {
+            short = "Heute"; long = "Heute"
+        } else if cal.isDateInTomorrow(date) {
+            short = "Morgen"; long = "Morgen"
+        } else {
+            short = date.formatted(.dateTime.weekday(.abbreviated).locale(locale))
+            long  = date.formatted(.dateTime.weekday(.wide).day().month(.twoDigits).locale(locale))
+        }
+        return DayBucket(id: "\(start)", label: long, shortLabel: short,
+                         globalStartIndex: start, globalEndIndex: end)
     }
 }
 

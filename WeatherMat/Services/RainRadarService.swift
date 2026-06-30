@@ -176,6 +176,30 @@ enum DwdIconForecastService {
         let availableTimes: [Date]
     }
 
+    static func loadFromCache() -> ForecastMeta? {
+        let defaults = UserDefaults.standard
+        guard let name = defaults.string(forKey: "dwd.iconeu.layerName"),
+              let date = defaults.object(forKey: "dwd.iconeu.layerDate") as? Date,
+              Date().timeIntervalSince(date) < 7 * 3600 else { return nil }
+        let times = computeExpectedTimes()
+        return times.isEmpty ? nil : ForecastMeta(layerName: name, availableTimes: times)
+    }
+
+    static func saveToCache(_ layerName: String) {
+        UserDefaults.standard.set(layerName, forKey: "dwd.iconeu.layerName")
+        UserDefaults.standard.set(Date(), forKey: "dwd.iconeu.layerDate")
+    }
+
+    // ICON-EU runs 4×/day at 00/06/12/18 UTC; published ~3 h after run start.
+    static func computeExpectedTimes() -> [Date] {
+        let sinceEpoch = Date().addingTimeInterval(-3 * 3600).timeIntervalSince1970
+        let runStart = Date(timeIntervalSince1970: floor(sinceEpoch / 21600.0) * 21600.0)
+        let now = Date()
+        return stride(from: 3600.0, through: 120 * 3600.0, by: 3600.0)
+            .map { runStart.addingTimeInterval($0) }
+            .filter { $0 > now }
+    }
+
     static func fetchForecastMeta() async throws -> ForecastMeta {
         let request = URLRequest(url: capabilitiesURL,
                                  cachePolicy: .returnCacheDataElseLoad,
