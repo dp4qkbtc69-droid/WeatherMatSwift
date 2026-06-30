@@ -221,11 +221,14 @@ enum DwdIconForecastService {
         "https://maps.dwd.de/geoserver/dwd/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities"
     )!
     private static let tileBase = "https://maps.dwd.de/geoserver/dwd/ows"
-    static let precipPatterns = ["TOTPREC", "PRECIP", "precipitation", "Niederschlag_RR"]
+    // Hourly-resolution patterns first so the parser can abort early on the right layer.
+    static let precipPatterns = ["TOTPREC_001H", "RR_001H", "PRECIP_001H",
+                                  "TOTPREC", "PRECIP", "precipitation", "Niederschlag_RR"]
 
     nonisolated(unsafe) static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
         return f
     }()
 
@@ -239,16 +242,24 @@ enum DwdIconForecastService {
         guard let name = defaults.string(forKey: "dwd.iconeu.layerName"),
               let date = defaults.object(forKey: "dwd.iconeu.layerDate") as? Date,
               Date().timeIntervalSince(date) < 7 * 3600 else { return nil }
+        let now = Date()
+        // Use actual WMS times if stored; fall back to computed times.
+        if let raw = defaults.array(forKey: "dwd.iconeu.times") as? [Double], !raw.isEmpty {
+            let times = raw.map { Date(timeIntervalSince1970: $0) }.filter { $0 > now }
+            if !times.isEmpty { return ForecastMeta(layerName: name, availableTimes: times) }
+        }
         let times = computeExpectedTimes()
         return times.isEmpty ? nil : ForecastMeta(layerName: name, availableTimes: times)
     }
 
-    static func saveToCache(_ layerName: String) {
+    static func saveToCache(_ layerName: String, times: [Date]) {
         UserDefaults.standard.set(layerName, forKey: "dwd.iconeu.layerName")
         UserDefaults.standard.set(Date(), forKey: "dwd.iconeu.layerDate")
+        UserDefaults.standard.set(times.map { $0.timeIntervalSince1970 },
+                                   forKey: "dwd.iconeu.times")
     }
 
-    // ICON-EU runs 4×/day at 00/06/12/18 UTC; published ~3 h after run start.
+    // Fallback when no WMS times are cached yet.
     static func computeExpectedTimes() -> [Date] {
         let sinceEpoch = Date().addingTimeInterval(-3 * 3600).timeIntervalSince1970
         let runStart = Date(timeIntervalSince1970: floor(sinceEpoch / 21600.0) * 21600.0)
@@ -376,9 +387,16 @@ private final class WMSCapabilitiesParser: NSObject, XMLParserDelegate {
                 if isPrecip, !layer.times.isEmpty {
                     let now = Date()
                     let future = layer.times.filter { $0 > now && $0 <= now.addingTimeInterval(120 * 3600) }
-                    if !future.isEmpty, matched == nil {
-                        matched = (layer.name, future)
-                        parser.abortParsing()
+                    if !future.isEmpty {
+                        // Prefer hourly layers (_001H / _1H) over longer accumulation periods.
+                        let isHourly = layer.name.contains("001H") || layer.name.contains("_1H")
+                        if matched == nil {
+                            matched = (layer.name, future)
+                            if isHourly { parser.abortParsing() }  // ideal match – stop early
+                        } else if isHourly {
+                            matched = (layer.name, future)          // upgrade to hourly
+                            parser.abortParsing()
+                        }
                     }
                 }
                 stack.removeLast()

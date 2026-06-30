@@ -115,14 +115,15 @@ private final class RainRadarViewModel {
     }
 
     private func appendIconEuFrames(to radarTimeline: RainRadarTimeline) async {
-        let cached = DwdIconForecastService.loadFromCache()
-        if let cached { applyIconEuMeta(cached, to: radarTimeline) }
-
-        guard let fresh = try? await DwdIconForecastService.fetchForecastMeta() else { return }
-        DwdIconForecastService.saveToCache(fresh.layerName)
-        if fresh.layerName != cached?.layerName {
-            applyIconEuMeta(fresh, to: radarTimeline)
+        // Show cached frames instantly while the network request is in flight.
+        if let cached = DwdIconForecastService.loadFromCache() {
+            applyIconEuMeta(cached, to: radarTimeline)
         }
+        // Always apply actual WMS times — never skip because the layer name is the same.
+        // Computed times (loadFromCache fallback) may not match the WMS time axis.
+        guard let fresh = try? await DwdIconForecastService.fetchForecastMeta() else { return }
+        DwdIconForecastService.saveToCache(fresh.layerName, times: fresh.availableTimes)
+        applyIconEuMeta(fresh, to: radarTimeline)
     }
 
     private func applyIconEuMeta(_ meta: DwdIconForecastService.ForecastMeta, to radarTimeline: RainRadarTimeline) {
