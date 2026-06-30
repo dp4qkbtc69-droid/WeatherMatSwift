@@ -33,6 +33,40 @@ struct RainRadarTimeline {
 }
 
 enum RainRadarService {
+
+    // In-memory preload populated while the user is on WeatherView.
+    nonisolated(unsafe) static var preloadedTimeline: RainRadarTimeline?
+
+    static func preloadIfNeeded() async {
+        guard preloadedTimeline == nil else { return }
+        guard let timeline = try? await fetchTimeline() else { return }
+        preloadedTimeline = timeline
+        saveTimelineCache(timeline)
+    }
+
+    static func loadCachedTimeline() -> RainRadarTimeline? {
+        guard let data = UserDefaults.standard.data(forKey: "radar.timeline.v1"),
+              let cache = try? JSONDecoder().decode(CachedRadarTimeline.self, from: data),
+              Date().timeIntervalSince(cache.savedAt) < 10 * 60 else { return nil }
+        return cache.toTimeline()
+    }
+
+    static func saveTimelineCache(_ timeline: RainRadarTimeline) {
+        let cache = CachedRadarTimeline(
+            host: timeline.host,
+            attribution: timeline.attribution,
+            isDwd: timeline.source == .dwd,
+            tileMaxZoom: timeline.tileMaxZoom,
+            frames: timeline.frames.map {
+                CachedRadarTimeline.Frame(time: $0.time, path: $0.path, isForecast: $0.isForecast)
+            },
+            savedAt: Date()
+        )
+        if let data = try? JSONEncoder().encode(cache) {
+            UserDefaults.standard.set(data, forKey: "radar.timeline.v1")
+        }
+    }
+
     static func fetchTimeline() async throws -> RainRadarTimeline {
         if let dwdBaseURL = localDwdRadarBaseURL {
             do {
@@ -113,6 +147,30 @@ enum RainRadarService {
         }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+}
+
+private struct CachedRadarTimeline: Codable {
+    struct Frame: Codable {
+        let time: Date
+        let path: String
+        let isForecast: Bool
+    }
+    let host: String
+    let attribution: String
+    let isDwd: Bool
+    let tileMaxZoom: Int?
+    let frames: [Frame]
+    let savedAt: Date
+
+    func toTimeline() -> RainRadarTimeline {
+        RainRadarTimeline(
+            host: host,
+            attribution: attribution,
+            source: isDwd ? .dwd : .rainViewer,
+            tileMaxZoom: tileMaxZoom,
+            frames: frames.map { RainRadarFrame(time: $0.time, path: $0.path, isForecast: $0.isForecast) }
+        )
     }
 }
 

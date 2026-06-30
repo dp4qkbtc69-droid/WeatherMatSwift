@@ -61,22 +61,57 @@ private final class RainRadarViewModel {
 
     func load() async {
         guard timeline == nil else { return }
+
+        // 1. Use preloaded data (fetched in background while user was on WeatherView)
+        if let preloaded = RainRadarService.preloadedTimeline {
+            applyTimeline(preloaded)
+            Task { await refreshAndExtend(over: preloaded) }
+            return
+        }
+
+        // 2. Use cached data from last session (UserDefaults, max 10 min old)
+        if let cached = RainRadarService.loadCachedTimeline() {
+            applyTimeline(cached)
+            Task { await refreshAndExtend(over: cached) }
+            return
+        }
+
+        // 3. First ever open – show spinner and fetch
         isLoading = true
         errorMessage = nil
         do {
             let loaded = try await RainRadarService.fetchTimeline()
-            timeline = loaded
-            if let latest = loaded.latestObservedFrame,
-               let index = visibleFrames.firstIndex(of: latest) {
-                selectedIndex = index
-            }
+            RainRadarService.preloadedTimeline = loaded
+            RainRadarService.saveTimelineCache(loaded)
+            applyTimeline(loaded)
             isLoading = false
-            // Extend with ICON-EU in background – radar is already visible
             Task { await appendIconEuFrames(to: loaded) }
         } catch {
             errorMessage = "Radar konnte nicht geladen werden."
             isLoading = false
         }
+    }
+
+    private func applyTimeline(_ loaded: RainRadarTimeline) {
+        timeline = loaded
+        if let latest = loaded.latestObservedFrame,
+           let index = visibleFrames.firstIndex(of: latest) {
+            selectedIndex = index
+        }
+    }
+
+    private func refreshAndExtend(over prior: RainRadarTimeline) async {
+        // Instantly apply ICON-EU forecast from cache
+        await appendIconEuFrames(to: prior)
+        // Silently fetch fresh timeline in background
+        guard let fresh = try? await RainRadarService.fetchTimeline() else { return }
+        RainRadarService.preloadedTimeline = fresh
+        RainRadarService.saveTimelineCache(fresh)
+        // Update frames without jumping the scrubber position
+        let currentIndex = selectedIndex
+        timeline = fresh
+        selectedIndex = min(currentIndex, visibleFrames.count - 1)
+        await appendIconEuFrames(to: fresh)
     }
 
     private func appendIconEuFrames(to radarTimeline: RainRadarTimeline) async {

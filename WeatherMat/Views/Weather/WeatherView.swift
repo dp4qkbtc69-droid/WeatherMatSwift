@@ -31,6 +31,13 @@ struct WeatherView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .task(id: vm.weatherData != nil) {
+            guard vm.weatherData != nil else { return }
+            // Preload radar timeline in background so radar opens instantly
+            Task.detached(priority: .background) {
+                await RainRadarService.preloadIfNeeded()
+            }
+        }
     }
 
     // MARK: - Main scroll content
