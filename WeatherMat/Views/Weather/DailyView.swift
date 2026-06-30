@@ -152,7 +152,7 @@ struct DailyRowView: View {
                     .monospacedDigit()
                     .lineLimit(1)
             }
-            .frame(width: 58, alignment: .leading)
+            .frame(width: 52, alignment: .leading)
 
             ZStack(alignment: .bottomTrailing) {
                 Image(systemName: day.condition.sfSymbol)
@@ -175,26 +175,26 @@ struct DailyRowView: View {
                            text: "\(day.windMax)",
                            color: windColor)
             }
-            .frame(width: 54, alignment: .leading)
+            .frame(width: 48, alignment: .leading)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 0)
 
             HStack(spacing: 6) {
                 Text("\(day.low)°")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.76))
                     .monospacedDigit()
-                    .frame(width: 34, alignment: .trailing)
+                    .frame(width: 30, alignment: .trailing)
 
                 TempBarView(low: day.low, high: day.high,
                             allLow: allLow, allHigh: allHigh)
-                    .frame(width: 76, height: 6)
+                    .frame(width: 60, height: 6)
 
                 Text("\(day.high)°")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
-                    .frame(width: 36, alignment: .leading)
+                    .frame(width: 30, alignment: .leading)
             }
         }
         .padding(.horizontal, 16)

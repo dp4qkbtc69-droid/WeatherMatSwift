@@ -4,6 +4,7 @@ import MapKit
 struct Where2GoView: View {
     @Environment(WeatherViewModel.self) private var vm
     @State private var selectedSpot: Where2GoSpot?
+    @State private var isExpanded = false
 
     var body: some View {
         @Bindable var vm = vm
@@ -11,36 +12,38 @@ struct Where2GoView: View {
         VStack(alignment: .leading, spacing: 14) {
             header
 
-            Picker("Zeitfenster", selection: $vm.where2GoWindow) {
-                ForEach(Where2GoWindow.allCases) { window in
-                    Label(window.label, systemImage: window.icon).tag(window)
+            if isExpanded {
+                Picker("Zeitfenster", selection: $vm.where2GoWindow) {
+                    ForEach(Where2GoWindow.allCases) { window in
+                        Label(window.label, systemImage: window.icon).tag(window)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: vm.where2GoWindow) { _, _ in vm.refreshWhere2Go() }
+                .pickerStyle(.segmented)
+                .onChange(of: vm.where2GoWindow) { _, _ in vm.refreshWhere2Go() }
 
-            radiusControl
+                radiusControl
 
-            sortControl
+                sortControl
 
-            scoreLegend
+                scoreLegend
 
-            if vm.isLoadingWhere2Go {
-                loadingRows
-            } else if let error = vm.where2GoError {
-                errorRow(error)
-            } else if vm.where2GoSpots.isEmpty {
-                emptyRow
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(vm.where2GoSpots) { spot in
-                        Button {
-                            selectedSpot = spot
-                            HapticService.impact(.light)
-                        } label: {
-                            spotRow(spot)
+                if vm.isLoadingWhere2Go {
+                    loadingRows
+                } else if let error = vm.where2GoError {
+                    errorRow(error)
+                } else if vm.where2GoSpots.isEmpty {
+                    emptyRow
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(vm.where2GoSpots) { spot in
+                            Button {
+                                selectedSpot = spot
+                                HapticService.impact(.light)
+                            } label: {
+                                spotRow(spot)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -50,9 +53,6 @@ struct Where2GoView: View {
         .background(.white.opacity(0.11))
         .background(.ultraThinMaterial.opacity(0.54))
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .task {
-            vm.loadWhere2GoIfNeeded()
-        }
         .sheet(item: $selectedSpot) { spot in
             Where2GoMapSheet(origin: vm.activeLocation, spot: spot)
                 .presentationDetents([.medium, .large])
@@ -60,36 +60,54 @@ struct Where2GoView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "figure.walk.motion")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.82))
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+            if isExpanded { vm.loadWhere2GoIfNeeded() }
+            HapticService.impact(.light)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "figure.walk.motion")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Wohin?")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text("Beste Sonne im Umkreis")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.62))
-            }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Wohin?")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Beste Sonne im Umkreis")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
 
-            Spacer()
+                Spacer()
 
-            Button {
-                vm.refreshWhere2Go(force: true)
-                HapticService.impact(.light)
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .semibold))
+                if isExpanded {
+                    Button {
+                        vm.refreshWhere2Go(force: true)
+                        HapticService.impact(.light)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.82))
+                    .background(.white.opacity(0.12))
+                    .clipShape(Circle())
+                    .accessibilityLabel("Wohin aktualisieren")
+                }
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
                     .frame(width: 34, height: 34)
+                    .background(.white.opacity(0.12))
+                    .clipShape(Circle())
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.82))
-            .background(.white.opacity(0.12))
-            .clipShape(Circle())
-            .accessibilityLabel("Wohin aktualisieren")
         }
+        .buttonStyle(.plain)
     }
 
     private var radiusControl: some View {
