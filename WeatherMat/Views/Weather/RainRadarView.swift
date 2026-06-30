@@ -10,11 +10,11 @@ private let rainRadarHomeRegion = MKCoordinateRegion(
 )
 
 private enum DwdWMSLayer: String, Identifiable {
-    case lightningDensity = "Blitzdichte"
+    case lightningDensity = "dwd:Blitzdichte"
 
     var id: String { rawValue }
 
-    var style: String { "blitzdichte" }
+    var style: String { "" }
 }
 
 @MainActor
@@ -573,7 +573,7 @@ private struct RadarMapRepresentable: UIViewRepresentable {
             }
             if let tileOverlay = overlay as? MKTileOverlay {
                 let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
-                renderer.alpha = 0.74
+                renderer.alpha = 0.88
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
@@ -1038,18 +1038,17 @@ private final class DwdWMSTileOverlay: MKTileOverlay {
         let bbox = webMercatorBBOX(for: path)
         var components = URLComponents(string: "https://maps.dwd.de/geoserver/dwd/ows")!
         components.queryItems = [
-            URLQueryItem(name: "SERVICE", value: "WMS"),
-            URLQueryItem(name: "VERSION", value: "1.3.0"),
-            URLQueryItem(name: "REQUEST", value: "GetMap"),
-            URLQueryItem(name: "FORMAT", value: "image/png"),
+            URLQueryItem(name: "SERVICE",     value: "WMS"),
+            URLQueryItem(name: "VERSION",     value: "1.3.0"),
+            URLQueryItem(name: "REQUEST",     value: "GetMap"),
+            URLQueryItem(name: "FORMAT",      value: "image/png"),
             URLQueryItem(name: "TRANSPARENT", value: "true"),
-            URLQueryItem(name: "LAYERS", value: layer.rawValue),
-            URLQueryItem(name: "STYLES", value: layer.style),
-            URLQueryItem(name: "CRS", value: "EPSG:3857"),
-            URLQueryItem(name: "BBOX", value: bbox),
-            URLQueryItem(name: "WIDTH", value: "512"),
-            URLQueryItem(name: "HEIGHT", value: "512"),
-            URLQueryItem(name: "TIME", value: "current")
+            URLQueryItem(name: "LAYERS",      value: layer.rawValue),
+            URLQueryItem(name: "STYLES",      value: layer.style),
+            URLQueryItem(name: "CRS",         value: "EPSG:3857"),
+            URLQueryItem(name: "BBOX",        value: bbox),
+            URLQueryItem(name: "WIDTH",       value: "512"),
+            URLQueryItem(name: "HEIGHT",      value: "512"),
         ]
         return components.url!
     }
