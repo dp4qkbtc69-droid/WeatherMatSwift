@@ -9,6 +9,14 @@ struct WeatherMatApp: App {
 
     private var theme: AppTheme { AppTheme(rawValue: themeName) ?? .system }
 
+    init() {
+        URLCache.shared = URLCache(
+            memoryCapacity: 80 * 1024 * 1024,
+            diskCapacity: 350 * 1024 * 1024,
+            diskPath: "WeatherMatURLCache"
+        )
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
