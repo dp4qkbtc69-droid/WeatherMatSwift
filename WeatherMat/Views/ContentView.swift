@@ -3,44 +3,24 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(WeatherViewModel.self) private var vm
-    @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showLocations = false
 
     var body: some View {
-        Group {
-            if hSizeClass == .regular {
-                iPadLayout
-            } else {
-                iPhoneLayout
-            }
-        }
-        .task {
-            await vm.useGPSLocation()
-        }
-    }
-
-    // MARK: - iPhone Layout
-    private var iPhoneLayout: some View {
         ZStack {
             backgroundLayer
             WeatherView(showLocations: $showLocations)
         }
         .ignoresSafeArea()
+        // Schriften skalieren mit den Systemeinstellungen, aber gedeckelt,
+        // damit die Karten-Layouts nicht zerbrechen.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .sheet(isPresented: $showLocations) {
             LocationsView()
                 .presentationBackground(.clear)
         }
-    }
-
-    // MARK: - iPad Layout
-    private var iPadLayout: some View {
-        NavigationSplitView {
-            LocationsView()
-                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
-        } detail: {
-            WeatherView(showLocations: $showLocations)
+        .task {
+            await vm.useGPSLocation()
         }
-        .background(backgroundLayer)
     }
 
     @ViewBuilder

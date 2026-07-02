@@ -41,11 +41,11 @@ struct RainBannerView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(displayText)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(.callout, weight: .semibold))
                         .foregroundStyle(.white)
                     if !rain.sub.isEmpty {
                         Text(rain.sub)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(.footnote, weight: .medium))
                             .foregroundStyle(.white.opacity(0.76))
                     }
                 }
@@ -61,10 +61,7 @@ struct RainBannerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.black.opacity(0.08))
-        .background(.white.opacity(0.11))
-        .background(.ultraThinMaterial.opacity(0.54))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .glassCard(cornerRadius: 16)
     }
 }
 
@@ -106,11 +103,11 @@ private struct RainMiniChartView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(horizonLabel)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.68))
                 Spacer()
                 Text(maxRateLabel)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(.caption2, weight: .medium))
                     .foregroundStyle(.white.opacity(0.52))
             }
 
@@ -179,10 +176,10 @@ struct ModelTrustView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text("Modell-Einigkeit: \(agreementPct)%")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .foregroundStyle(.white)
                     Text(horizonLabel)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(.caption, weight: .medium))
                         .foregroundStyle(.white.opacity(0.62))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
@@ -191,20 +188,20 @@ struct ModelTrustView: View {
                 }
                 // Dominant model(s) for this horizon — bold
                 Text(dominantLabel)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(.caption, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.82))
                     .lineLimit(1)
                 // All active models — dimmer, so user can verify what's actually loaded
                 if activeModels.count > 1 {
                     Text(activeModels.joined(separator: " · "))
-                        .font(.system(size: 11))
+                        .font(.caption2)
                         .foregroundStyle(.white.opacity(0.52))
                         .lineLimit(1)
                 }
             }
             Spacer()
             Text(confidence.label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(.footnote, weight: .semibold))
                 .foregroundStyle(confidence.color)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -215,7 +212,7 @@ struct ModelTrustView: View {
         .padding(.vertical, 10)
         .background(Color.black.opacity(0.08))
         .background(.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -229,14 +226,14 @@ struct WarningsBannerView: View {
                 HStack(spacing: 10) {
                     Image(systemName: w.severity.sfSymbol)
                         .foregroundStyle(w.severity.color)
-                        .font(.system(size: 18))
+                        .font(.headline)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(w.headlineDe)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(.footnote, weight: .semibold))
                             .foregroundStyle(.white)
                             .lineLimit(2)
                         Text(w.eventDe)
-                            .font(.system(size: 11))
+                            .font(.caption2)
                             .foregroundStyle(.white.opacity(0.65))
                     }
                     Spacer()
@@ -244,7 +241,7 @@ struct WarningsBannerView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(w.severity.color.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
             }
         }
     }

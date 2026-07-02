@@ -22,14 +22,14 @@ struct StatsView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 13))
+                        .font(.footnote)
                         .foregroundStyle(.white.opacity(0.72))
                     Text(isExpanded ? "Details" : detailsSummary)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.76))
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.58))
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
@@ -47,10 +47,7 @@ struct StatsView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(Color.black.opacity(0.08))
-        .background(.white.opacity(0.11))
-        .background(.ultraThinMaterial.opacity(0.54))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .glassCard()
     }
 
     // One-line summary shown when collapsed
@@ -170,9 +167,9 @@ struct StatTileView: View {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .foregroundStyle(.white.opacity(0.66))
-                    .font(.system(size: 13))
+                    .font(.footnote)
                 Text(label)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(.caption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.68))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
@@ -183,7 +180,7 @@ struct StatTileView: View {
                         showInfo = true
                     } label: {
                         Image(systemName: "info.circle.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(.footnote, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.62))
                     }
                     .buttonStyle(.plain)
@@ -191,7 +188,7 @@ struct StatTileView: View {
                 }
             }
             Text(value)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(.headline, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
@@ -201,7 +198,7 @@ struct StatTileView: View {
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.08))
         .background(.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .alert(infoTitle ?? label, isPresented: $showInfo) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -228,14 +225,14 @@ struct NetatmoStationPanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "sensor.tag.radiowaves.forward.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(Color(hex: "#68d391"))
                 Text("Netatmo Station")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
                 Spacer()
                 Text("\(observations.filter(\.isFresh).count)/\(observations.count) frisch")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(.caption, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.56))
             }
 
@@ -256,7 +253,7 @@ struct NetatmoStationPanelView: View {
                                     Text(observation.displayName)
                                         .lineLimit(1)
                                 }
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(.caption, weight: .bold))
                                 .foregroundStyle(selectedIndex == index ? Color(hex: "#5b3b00") : .white.opacity(0.82))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 7)
@@ -281,21 +278,21 @@ struct NetatmoStationPanelView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(.footnote, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                     Text("Details")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(.subheadline, weight: .bold))
                         .foregroundStyle(.white.opacity(0.86))
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.58))
                         .rotationEffect(.degrees(isDetailsExpanded ? 180 : 0))
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
                 .background(Color.white.opacity(0.09))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
             }
             .buttonStyle(.plain)
 
@@ -310,10 +307,7 @@ struct NetatmoStationPanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color.black.opacity(0.08))
-        .background(.white.opacity(0.11))
-        .background(.ultraThinMaterial.opacity(0.54))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .glassCard()
     }
 }
 
@@ -324,14 +318,14 @@ struct NetatmoModuleRowView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "sensor.tag.radiowaves.forward.fill")
-                    .font(.system(size: 13))
+                    .font(.footnote)
                     .foregroundStyle(Color(hex: "#68d391"))
                 Text(observation.displayName)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(.caption, weight: .bold))
                     .foregroundStyle(.white.opacity(0.78))
                 Spacer()
                 Text(observation.ageLabel)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(observation.isFresh ? .white.opacity(0.52) : Color(hex: "#f6e05e").opacity(0.82))
             }
             HStack(spacing: 12) {
@@ -366,16 +360,16 @@ struct NetatmoModuleRowView: View {
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.10))
         .background(.white.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func value(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(.headline, weight: .semibold))
                 .foregroundStyle(.white)
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
                 .foregroundStyle(.white.opacity(0.58))
         }
     }

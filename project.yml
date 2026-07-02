@@ -69,6 +69,7 @@ targets:
       path: WeatherMat/WeatherMat.entitlements
       properties:
         com.apple.developer.weatherkit: true
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.praxishartlep.weathermat

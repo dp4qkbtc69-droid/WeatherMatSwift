@@ -23,9 +23,9 @@ struct HourlyView: View {
             HStack(alignment: .center) {
                 HStack(spacing: 7) {
                     Image(systemName: "clock.fill")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                     Text(label)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(.callout, weight: .semibold))
                 }
                 .foregroundStyle(.white.opacity(0.9))
 
@@ -37,7 +37,7 @@ struct HourlyView: View {
 
             if entries.isEmpty {
                 Text("Keine stündlichen Daten")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(.subheadline, weight: .medium))
                     .foregroundStyle(.white.opacity(0.68))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 20)
@@ -46,10 +46,7 @@ struct HourlyView: View {
             }
         }
         .padding(.vertical, 12)
-        .background(Color.black.opacity(0.08))
-        .background(.white.opacity(0.11))
-        .background(.ultraThinMaterial.opacity(0.54))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .glassCard()
         .padding(.horizontal)
     }
 
@@ -63,7 +60,7 @@ struct HourlyView: View {
                     }
                 } label: {
                     Text("\(step) h")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(.footnote, weight: .bold))
                         .monospacedDigit()
                         .foregroundStyle(hourStep == step ? Color(hex: "#5b3b00") : .white.opacity(0.82))
                         .padding(.horizontal, 8)
@@ -153,7 +150,7 @@ struct HourlyCellView: View {
         .frame(width: cellWidth)
         .padding(.vertical, 8)
         .background(isFirst ? Color.black.opacity(0.10) : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var precipColor: Color {
@@ -165,9 +162,9 @@ struct HourlyCellView: View {
     private func metricLine(icon: String, text: String, color: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(.caption2, weight: .semibold))
             Text(text)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(.caption, weight: .bold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)

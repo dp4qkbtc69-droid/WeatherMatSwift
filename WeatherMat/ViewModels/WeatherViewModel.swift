@@ -3,6 +3,22 @@ import Foundation
 import CoreLocation
 import Observation
 
+/// Typed load failures — the view maps these to icon/title/detail without
+/// string matching on message text.
+enum WeatherLoadError {
+    case timeout
+    case noData
+    case gpsUnavailable
+
+    var message: String {
+        switch self {
+        case .timeout:        return "Zeitüberschreitung – Verbindung prüfen"
+        case .noData:         return "Keine Wetterdaten – Verbindung prüfen"
+        case .gpsUnavailable: return "GPS nicht verfügbar"
+        }
+    }
+}
+
 @Observable
 final class WeatherViewModel {
 
@@ -10,7 +26,7 @@ final class WeatherViewModel {
     var weatherData:   EnsembleWeatherData?
     var isLoading      = false
     var isRefreshing   = false
-    var errorMessage:  String?
+    var loadError:     WeatherLoadError?
     var feedbackMessage: String?
     var where2GoSpots: [Where2GoSpot] = []
     var where2GoWindow: Where2GoWindow = .tomorrow
@@ -119,7 +135,7 @@ final class WeatherViewModel {
         if activeLocation?.id == loc.id {
             isLoading    = weatherData == nil
             isRefreshing = weatherData != nil
-            errorMessage = nil
+            loadError    = nil
         }
 
         let clLoc  = CLLocation(latitude: loc.latitude, longitude: loc.longitude)
@@ -129,7 +145,7 @@ final class WeatherViewModel {
 
         guard let result else {
             if activeLocation?.id == loc.id {
-                errorMessage = "Zeitüberschreitung – Verbindung prüfen"
+                loadError = .timeout
                 isLoading    = false
                 isRefreshing = false
             }
@@ -138,7 +154,7 @@ final class WeatherViewModel {
 
         if result.activeModels.isEmpty {
             if activeLocation?.id == loc.id {
-                errorMessage = "Keine Wetterdaten – Verbindung prüfen"
+                loadError = .noData
             }
         } else {
             let fetchedAt = Date()
@@ -313,7 +329,7 @@ final class WeatherViewModel {
             if let loc = activeLocation {
                 await loadWeather(for: loc)
             } else {
-                errorMessage = "GPS nicht verfügbar"
+                loadError = .gpsUnavailable
             }
         }
     }
@@ -326,6 +342,10 @@ final class WeatherViewModel {
     func saveLocations() {
         if let data = try? JSONEncoder().encode(savedLocations) {
             UserDefaults.standard.set(data, forKey: udKey)
+        }
+        // Keep the warning-push registration in sync with the saved locations.
+        Task { @MainActor in
+            await PushRegistrationService.shared.syncRegistration()
         }
     }
 

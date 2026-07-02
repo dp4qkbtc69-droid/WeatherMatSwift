@@ -1,9 +1,11 @@
 // OpenMeteoService.swift
 import Foundation
 import CoreLocation
+import os
 
 final class OpenMeteoService: WeatherProviding, @unchecked Sendable {
 
+    private static let logger = Logger(subsystem: "de.praxishartlep.weathermat", category: "OpenMeteo")
     let modelName: String
     let weight:    Double
     private let model: String
@@ -49,20 +51,14 @@ final class OpenMeteoService: WeatherProviding, @unchecked Sendable {
         let (data, response) = try await URLSession.shared.data(from: url)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
-            #if DEBUG
-            print("[\(modelName)] HTTP \(status) — fetch failed")
-            #endif
+            Self.logger.warning("\(self.modelName, privacy: .public) HTTP \(status) — fetch failed")
             throw WeatherError.notAvailable
         }
-        #if DEBUG
-        print("[\(modelName)] OK")
-        #endif
+        Self.logger.debug("\(self.modelName, privacy: .public) fetch OK")
         do {
             return try parse(JSONDecoder().decode(OMResponse.self, from: data))
         } catch {
-            #if DEBUG
-            print("[\(modelName)] decode error: \(error)")
-            #endif
+            Self.logger.warning("\(self.modelName, privacy: .public) decode error: \(String(describing: error), privacy: .public)")
             throw WeatherError.decodingError(error)
         }
     }

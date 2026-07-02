@@ -3,9 +3,11 @@
 import Foundation
 import CoreLocation
 import WeatherKit
+import os
 
 final class WeatherKitService: WeatherProviding, @unchecked Sendable {
 
+    private static let logger = Logger(subsystem: "de.praxishartlep.weathermat", category: "WeatherKit")
     let modelName = "WeatherKit"
     let weight    = ModelWeights.weatherKit
     static let shared = WeatherKitService()
@@ -19,15 +21,11 @@ final class WeatherKitService: WeatherProviding, @unchecked Sendable {
             let core: (WeatherKit.CurrentWeather, Forecast<HourWeather>, Forecast<DayWeather>) =
                 try await service.weather(for: location, including: .current, .hourly, .daily)
             async let minuteForecast: Forecast<MinuteWeather>? = try? await service.weather(for: location, including: .minute)
-            #if DEBUG
-            print("[WeatherKit] OK")
-            #endif
+            Self.logger.debug("fetch OK")
             UserDefaults.standard.set("aktiv", forKey: statusKey)
             return parse(current: core.0, hourlyForecast: core.1, dailyForecast: core.2, minuteForecast: await minuteForecast)
         } catch {
-            #if DEBUG
-            print("[WeatherKit] failed: \(error)")
-            #endif
+            Self.logger.warning("fetch failed: \(String(describing: error), privacy: .public)")
             UserDefaults.standard.set(diagnosticMessage(for: error), forKey: statusKey)
             throw WeatherError.networkError(error)
         }

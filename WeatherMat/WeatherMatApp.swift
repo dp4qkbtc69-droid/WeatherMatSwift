@@ -1,9 +1,33 @@
 // WeatherMatApp.swift
 import SwiftUI
 import BackgroundTasks
+import os
+
+/// Bridges UIKit remote-notification callbacks (device token) into SwiftUI.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    private static let logger = Logger(subsystem: "de.praxishartlep.weathermat", category: "Push")
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { @MainActor in
+            PushRegistrationService.shared.updateDeviceToken(token)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        Self.logger.warning("remote notification registration failed: \(String(describing: error), privacy: .public)")
+    }
+}
 
 @main
 struct WeatherMatApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var vm = WeatherViewModel()
     @AppStorage("appTheme") private var themeName: String = AppTheme.system.rawValue
 

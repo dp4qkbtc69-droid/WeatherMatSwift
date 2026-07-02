@@ -30,10 +30,10 @@ final class BrightSkyService: @unchecked Sendable {
         }
     }
 
+    private static let isoFormat = Date.ISO8601FormatStyle()
+
     private func iso(_ s: String) -> Date? {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f.date(from: s)
+        try? Self.isoFormat.parse(s)
     }
 }
 

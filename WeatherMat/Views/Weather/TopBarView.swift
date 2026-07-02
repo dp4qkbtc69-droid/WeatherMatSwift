@@ -15,10 +15,10 @@ struct TopBarView: View {
                 HStack(spacing: 6) {
                     if vm.activeLocation?.isGPS == true {
                         Image(systemName: "location.fill")
-                            .font(.system(size: 13))
+                            .font(.footnote)
                     }
                     Text(vm.activeLocation?.name ?? "—")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(.title3, weight: .semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                 }
@@ -48,7 +48,7 @@ struct TopBarView: View {
                         showLocations = true
                     } label: {
                         Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 21, weight: .semibold))
+                            .font(.system(.title3, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
@@ -73,7 +73,7 @@ struct TopBarView: View {
                             }
                         } label: {
                             Label("Wetter melden", systemImage: "cloud.rain.fill")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(.footnote, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.92))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 7)
@@ -88,7 +88,7 @@ struct TopBarView: View {
                             openRainRadar()
                         } label: {
                             Image(systemName: "map.fill")
-                                .font(.system(size: 17, weight: .semibold))
+                                .font(.system(.body, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.94))
                                 .frame(width: 38, height: 38)
                                 .background(.white.opacity(0.16))
@@ -139,12 +139,12 @@ private struct WeatherFeedbackPanel: View {
                     VStack(spacing: 6) {
                         Image(systemName: feedback.quickReportIcon)
                             .symbolRenderingMode(.hierarchical)
-                            .font(.system(size: 22, weight: .semibold))
+                            .font(.system(.title2, weight: .semibold))
                             .foregroundStyle(feedback.quickReportTint)
                             .frame(height: 24)
 
                         Text(feedback.compactLabel)
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(.caption, weight: .bold))
                             .multilineTextAlignment(.center)
                             .lineLimit(1)
                             .minimumScaleFactor(0.78)
@@ -154,7 +154,7 @@ private struct WeatherFeedbackPanel: View {
                     .frame(width: 152, height: 54)
                     .background(Color.black.opacity(0.18))
                     .background(.white.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(feedback.label)
@@ -239,12 +239,12 @@ struct ModelStatusButton: View {
                 HStack(spacing: 7) {
                     TrafficLightView(level: displayConfidence)
                     Text(statusText)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(.footnote, weight: .semibold))
                     Text("\(displayAgreementPct)%")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(.footnote, weight: .bold))
                         .monospacedDigit()
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
@@ -258,7 +258,7 @@ struct ModelStatusButton: View {
             if isExpanded {
                 VStack(alignment: .leading, spacing: 7) {
                     Label(horizonLabel, systemImage: "calendar")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(.footnote, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.92))
 
                     if !confidenceBands.isEmpty {
@@ -266,12 +266,12 @@ struct ModelStatusButton: View {
                     }
 
                     Text("Stärkste Modelle: \(dominantLabel)")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(.footnote, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
 
                     Text(activeModels.isEmpty ? "Aktuell keine Quellen aktiv" : activeModels.joined(separator: " · "))
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(.caption, weight: .medium))
                         .foregroundStyle(.white.opacity(0.72))
                         .lineLimit(3)
                 }
@@ -280,7 +280,7 @@ struct ModelStatusButton: View {
                 .background(Color.black.opacity(0.12))
                 .background(.white.opacity(0.12))
                 .background(.ultraThinMaterial.opacity(0.78))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -300,15 +300,15 @@ private struct ConfidenceBandsView: View {
                         .fill(band.confidence.color)
                         .frame(width: 7, height: 7)
                     Text(band.title)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .foregroundStyle(.white.opacity(0.84))
                         .frame(width: 42, alignment: .leading)
                     Text(band.subtitle)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(.caption2, weight: .medium))
                         .foregroundStyle(.white.opacity(0.6))
                     Spacer()
                     Text("\(band.agreementPct)%")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .monospacedDigit()
                         .foregroundStyle(.white.opacity(0.88))
                 }
@@ -346,7 +346,7 @@ struct ThemePickerSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             Text("Darstellung")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(.body, weight: .semibold))
                 .padding(.top, 20)
                 .padding(.bottom, 16)
 
@@ -368,7 +368,7 @@ struct ThemePickerSheet: View {
             Spacer()
 
             Button("Fertig") { dismiss() }
-                .font(.system(size: 17, weight: .medium))
+                .font(.system(.body, weight: .medium))
                 .foregroundStyle(.primary)
                 .padding(.bottom, 24)
         }
@@ -390,7 +390,7 @@ struct ThemeOptionButton: View {
                         .fill(previewBackground)
                         .frame(width: 64, height: 64)
                     Image(systemName: theme.icon)
-                        .font(.system(size: 22, weight: .medium))
+                        .font(.system(.title2, weight: .medium))
                         .foregroundStyle(previewForeground)
                 }
                 .overlay {
@@ -408,7 +408,7 @@ struct ThemeOptionButton: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
     }

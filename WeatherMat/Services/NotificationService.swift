@@ -1,6 +1,7 @@
 // NotificationService.swift
 import Foundation
 import UserNotifications
+import UIKit
 
 @MainActor
 final class NotificationService: NSObject {
@@ -15,12 +16,18 @@ final class NotificationService: NSObject {
 
     // MARK: - Permission
     func requestAuthorization() async {
-        _ = try? await UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound, .badge])
+        let granted = (try? await UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        if granted {
+            // Device token arrives via AppDelegate and is forwarded to the proxy.
+            UIApplication.shared.registerForRemoteNotifications()
+        }
     }
 
     // MARK: - Check for new DWD warnings
     func checkWarnings(_ warnings: [DWDWarning]) async {
+        // Server push delivers warnings via APNs — skip local duplicates.
+        guard !PushRegistrationService.isPushActive else { return }
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized else { return }

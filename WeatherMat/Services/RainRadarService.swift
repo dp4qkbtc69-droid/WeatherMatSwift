@@ -170,6 +170,11 @@ enum RainRadarService {
         return URL(string: rawValue)
     }
 
+    /// Proxy base URL for sibling services (push registration, warm-location).
+    static var proxyBaseURL: URL? {
+        localDwdRadarBaseURL
+    }
+
     static func authenticatedDwdRadarRequest(_ url: URL, cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy) -> URLRequest {
         var request = URLRequest(url: url, cachePolicy: cachePolicy)
         if let token = localDwdRadarToken, !token.isEmpty {

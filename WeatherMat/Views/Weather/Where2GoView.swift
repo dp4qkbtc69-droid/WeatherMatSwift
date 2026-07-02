@@ -49,10 +49,7 @@ struct Where2GoView: View {
             }
         }
         .padding(16)
-        .background(Color.black.opacity(0.08))
-        .background(.white.opacity(0.11))
-        .background(.ultraThinMaterial.opacity(0.54))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .glassCard()
         .sheet(item: $selectedSpot) { spot in
             Where2GoMapSheet(origin: vm.activeLocation, spot: spot)
                 .presentationDetents([.medium, .large])
@@ -67,15 +64,15 @@ struct Where2GoView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "figure.walk.motion")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(.body, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.82))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Wohin?")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(.headline, weight: .semibold))
                         .foregroundStyle(.white)
                     Text("Beste Sonne im Umkreis")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(.caption, weight: .medium))
                         .foregroundStyle(.white.opacity(0.62))
                 }
 
@@ -87,7 +84,7 @@ struct Where2GoView: View {
                         HapticService.impact(.light)
                     } label: {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(.subheadline, weight: .semibold))
                             .frame(width: 34, height: 34)
                     }
                     .buttonStyle(.plain)
@@ -98,7 +95,7 @@ struct Where2GoView: View {
                 }
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(.footnote, weight: .bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     .animation(.easeInOut(duration: 0.2), value: isExpanded)
@@ -116,11 +113,11 @@ struct Where2GoView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Radius", systemImage: "scope")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(.footnote, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.72))
                 Spacer()
                 Text("\(vm.where2GoRadiusKm) km")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(.footnote, weight: .bold))
                     .foregroundStyle(.white)
             }
 
@@ -154,11 +151,11 @@ struct Where2GoView: View {
     private var scoreLegend: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "info.circle.fill")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(.caption, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.58))
                 .padding(.top, 1)
             Text("Score bewertet Sonne, Regen, Wind und Temperatur. „Beste“ zeigt den stärksten Wettertreffer zuerst, „Nächste“ sortiert dieselben Top-Ziele nach Entfernung.")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(.caption, weight: .medium))
                 .foregroundStyle(.white.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -185,7 +182,7 @@ struct Where2GoView: View {
 
     private var emptyRow: some View {
         Text("Noch keine Ziele berechnet.")
-            .font(.system(size: 14, weight: .medium))
+            .font(.system(.subheadline, weight: .medium))
             .foregroundStyle(.white.opacity(0.68))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
@@ -196,7 +193,7 @@ struct Where2GoView: View {
             Image(systemName: "wifi.exclamationmark")
                 .foregroundStyle(.white.opacity(0.75))
             Text(text)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(.subheadline, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75))
             Spacer()
         }
@@ -210,7 +207,7 @@ struct Where2GoView: View {
                     .fill(scoreColor(spot.score).opacity(0.28))
                 VStack(spacing: 1) {
                     Text("\(spot.score)")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(.subheadline, weight: .bold))
                         .foregroundStyle(.white)
                     Text("Score")
                         .font(.system(size: 8, weight: .bold))
@@ -222,17 +219,17 @@ struct Where2GoView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Image(systemName: spot.condition.sfSymbol)
-                        .font(.system(size: 13))
+                        .font(.footnote)
                         .foregroundStyle(.white.opacity(0.8))
                     Text(spot.name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
 
                 Text("\(spot.dateLabel) · \(spot.direction) · \(spot.distanceKm) km · \(String(format: "%.1f h Sonne", spot.sunshineHours))")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(.caption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.62))
 
                 HStack(spacing: 10) {
@@ -246,16 +243,16 @@ struct Where2GoView: View {
         .padding(12)
         .background(Color.black.opacity(0.08))
         .background(.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .contentShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func metric(_ icon: String, _ value: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(.caption2, weight: .semibold))
             Text(value)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(.caption2, weight: .semibold))
         }
         .foregroundStyle(.white.opacity(0.68))
     }
@@ -321,17 +318,17 @@ private struct Where2GoMapSheet: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(spot.name)
-                                .font(.system(size: 18, weight: .semibold))
+                                .font(.system(.headline, weight: .semibold))
                             Text("\(spot.direction) · \(spot.distanceKm) km · \(spot.dateLabel) · \(String(format: "%.1f h Sonne", spot.sunshineHours))")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(.footnote, weight: .medium))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
                         VStack(spacing: 1) {
                             Text("\(spot.score)")
-                                .font(.system(size: 20, weight: .bold))
+                                .font(.system(.title3, weight: .bold))
                             Text("Score")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(.caption2, weight: .bold))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -360,7 +357,7 @@ private struct Where2GoMapSheet: View {
 
     private func mapMetric(_ icon: String, _ value: String) -> some View {
         Label(value, systemImage: icon)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(.caption, weight: .semibold))
             .foregroundStyle(.secondary)
     }
 }

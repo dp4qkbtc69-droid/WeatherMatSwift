@@ -23,12 +23,12 @@ struct HeroView: View {
 
             // Condition label
             Text(current.condition.label)
-                .font(.system(size: 20, weight: .medium))
+                .font(.system(.title3, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85))
 
             // Feels like
             Text("Gefühlt \(current.feelsLike)°")
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.65))
                 .padding(.bottom, 4)
 
@@ -41,7 +41,7 @@ struct HeroView: View {
                         .foregroundStyle(Color(hex: "#8fe3ff"))
                 }
             }
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(.subheadline, weight: .medium))
             .foregroundStyle(.white.opacity(0.75))
 
             // Sunrise / sunset pills
@@ -75,9 +75,9 @@ struct SunPillsView: View {
         HStack(spacing: 5) {
             Image(systemName: icon)
                 .symbolRenderingMode(.multicolor)
-                .font(.system(size: 15))
+                .font(.subheadline)
             Text(text)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
         }
         .padding(.horizontal, 14)

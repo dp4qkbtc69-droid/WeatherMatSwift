@@ -48,10 +48,10 @@ struct LocationsView: View {
                                 .font(.system(size: 32, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.46))
                             Text("Keine Ergebnisse")
-                                .font(.system(size: 17, weight: .semibold))
+                                .font(.system(.body, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.82))
                             Text("Prüfe die Schreibweise oder suche nach einer größeren Stadt in der Nähe.")
-                                .font(.system(size: 14))
+                                .font(.subheadline)
                                 .foregroundStyle(.white.opacity(0.64))
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 36)
@@ -81,7 +81,7 @@ struct LocationsView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "location.fill")
                             Text("GPS")
-                                .font(.system(size: 14))
+                                .font(.subheadline)
                         }
                         .foregroundStyle(.cyan)
                     }
@@ -110,17 +110,17 @@ struct LocationsView: View {
             ForEach(vm.savedLocations) { loc in
                 HStack(spacing: 12) {
                     Image(systemName: loc.isGPS ? "location.fill" : "mappin.circle.fill")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(.headline, weight: .semibold))
                         .foregroundStyle(loc.id == vm.activeLocation?.id ? .cyan : .white.opacity(0.58))
                         .frame(width: 28)
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(loc.name)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(.callout, weight: .semibold))
                             .foregroundStyle(.white)
                         if !loc.subtitle.isEmpty {
                             Text(loc.subtitle)
-                                .font(.system(size: 13))
+                                .font(.footnote)
                                 .foregroundStyle(.white.opacity(0.62))
                         }
                     }
@@ -185,22 +185,22 @@ struct LocationsView: View {
                                     .fill(.white.opacity(0.12))
                                     .frame(width: 38, height: 38)
                                 Image(systemName: "mappin.circle.fill")
-                                    .font(.system(size: 20))
+                                    .font(.title3)
                                     .foregroundStyle(.white.opacity(0.6))
                             }
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(result.name)
-                                    .font(.system(size: 17, weight: .semibold))
+                                    .font(.system(.body, weight: .semibold))
                                     .foregroundStyle(.white)
                                 if !result.subtitle.isEmpty {
                                     Text(result.subtitle)
-                                        .font(.system(size: 14))
+                                        .font(.subheadline)
                                         .foregroundStyle(.white.opacity(0.68))
                                 }
                             }
                             Spacer()
                             Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 22))
+                                .font(.title2)
                                 .foregroundStyle(.cyan.opacity(0.8))
                         }
                         .padding(.horizontal, 14)
@@ -224,10 +224,10 @@ struct LocationsView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.white.opacity(0.25))
             Text("Noch keine Orte gespeichert")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(.headline, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.84))
             Text("Suche nach einer Stadt oder nutze GPS")
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.64))
         }
         .frame(maxWidth: .infinity)
@@ -283,17 +283,17 @@ struct SettingsSectionView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "gearshape.fill")
-                    .font(.system(size: 13))
+                    .font(.footnote)
                     .foregroundStyle(.white.opacity(0.66))
                 Text("Einstellungen")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.72))
             }
             .padding(.horizontal, 4)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Darstellung")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.88))
 
                 HStack(spacing: 10) {
@@ -403,7 +403,7 @@ struct DataSourceStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Datenquellen")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(.callout, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.88))
 
             StatusPill(
@@ -445,14 +445,14 @@ struct StatusPill: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(.footnote, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
                 Text(subtitle)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(.caption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.64))
                     .lineLimit(3)
                     .minimumScaleFactor(0.82)
@@ -481,16 +481,16 @@ struct SettingsActionRow: View {
                         .fill(tint.opacity(0.18))
                         .frame(width: 36, height: 36)
                     Image(systemName: icon)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(.callout, weight: .semibold))
                         .foregroundStyle(tint)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                     Text(subtitle)
-                        .font(.system(size: 13))
+                        .font(.footnote)
                         .foregroundStyle(.white.opacity(0.64))
                         .lineLimit(2)
                 }
@@ -498,7 +498,7 @@ struct SettingsActionRow: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(.caption, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.36))
             }
             .padding(.horizontal, 14)
@@ -521,7 +521,7 @@ struct LocationCardView: View {
                     .fill(isActive ? .white.opacity(0.18) : .white.opacity(0.08))
                     .frame(width: 40, height: 40)
                 Image(systemName: loc.isGPS ? "location.fill" : "mappin")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(.callout, weight: .medium))
                     .foregroundStyle(loc.isGPS ? .cyan : .white.opacity(0.65))
             }
 
@@ -531,7 +531,7 @@ struct LocationCardView: View {
                     .foregroundStyle(.white)
                 if !loc.subtitle.isEmpty {
                     Text(loc.subtitle)
-                        .font(.system(size: 14))
+                        .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.66))
                 }
             }
@@ -540,7 +540,7 @@ struct LocationCardView: View {
 
             if isActive {
                 Label("Aktiv", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(.footnote, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
@@ -568,10 +568,10 @@ struct SearchBar: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(.callout, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.62))
             TextField("Stadt suchen…", text: $text)
-                .font(.system(size: 17))
+                .font(.body)
                 .foregroundStyle(.white)
                 .tint(.cyan)
                 .autocorrectionDisabled()
@@ -582,12 +582,13 @@ struct SearchBar: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.white.opacity(0.35))
                 }
+                .accessibilityLabel("Suche löschen")
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
         .background(.white.opacity(0.1))
         .background(.ultraThinMaterial.opacity(0.4))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }

@@ -15,8 +15,8 @@ struct WeatherView: View {
                 LoadingView()
             } else if let data = vm.weatherData {
                 mainScrollView(data: data)
-            } else if let error = vm.errorMessage {
-                ErrorView(message: error) {
+            } else if let error = vm.loadError {
+                ErrorView(error: error) {
                     Task { await vm.refresh() }
                 } openLocations: {
                     showLocations = true
@@ -138,7 +138,7 @@ struct LoadingView: View {
                 .scaleEffect(1.4)
             Text("Lade Wetterdaten…")
                 .foregroundStyle(.white.opacity(0.82))
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(.callout, weight: .medium))
             if showRetry {
                 Button("Erneut versuchen") {
                     Task { await vm.refresh() }
@@ -159,38 +159,33 @@ struct LoadingView: View {
 
 // MARK: - Error
 struct ErrorView: View {
-    let message: String
+    let error: WeatherLoadError
     let retry: () -> Void
     let openLocations: () -> Void
 
+    private var message: String { error.message }
+
     private var presentation: (icon: String, title: String, detail: String) {
-        let lower = message.lowercased()
-        if lower.contains("standort") || lower.contains("gps") {
+        switch error {
+        case .gpsUnavailable:
             return (
                 "location.slash.fill",
                 "Standort nicht verfügbar",
                 "Prüfe die Standortfreigabe oder wähle einen gespeicherten Ort aus."
             )
-        }
-        if lower.contains("zeit") || lower.contains("timeout") || lower.contains("internet") || lower.contains("network") {
+        case .timeout:
             return (
                 "wifi.exclamationmark",
                 "Verbindung langsam",
                 "Die Wetterdienste antworten gerade nicht zuverlässig. Ein neuer Versuch lädt alle Quellen frisch."
             )
-        }
-        if lower.contains("wetterdaten") || lower.contains("keine daten") {
+        case .noData:
             return (
                 "cloud.slash.fill",
                 "Keine Wetterdaten",
                 "Für diesen Ort haben die Modelle gerade keine verwertbare Vorhersage geliefert."
             )
         }
-        return (
-            "exclamationmark.triangle.fill",
-            "Wetterdaten nicht geladen",
-            "Die App konnte die aktuelle Vorhersage nicht vollständig abrufen."
-        )
     }
 
     var body: some View {
@@ -200,18 +195,18 @@ struct ErrorView: View {
                 .foregroundStyle(.white.opacity(0.78))
 
             Text(presentation.title)
-                .font(.system(size: 23, weight: .semibold))
+                .font(.system(.title2, weight: .semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
 
             Text(message)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(.callout, weight: .medium))
                 .foregroundStyle(.white.opacity(0.84))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
             Text(presentation.detail)
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.68))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 34)
@@ -242,10 +237,10 @@ struct EmptyStateView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(.white.opacity(0.7))
             Text("Kein Ort ausgewählt")
-                .font(.system(size: 23, weight: .semibold))
+                .font(.system(.title2, weight: .semibold))
                 .foregroundStyle(.white)
             Text("Wähle einen Ort oder nutze GPS, damit die App die passenden Wettermodelle laden kann.")
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 34)

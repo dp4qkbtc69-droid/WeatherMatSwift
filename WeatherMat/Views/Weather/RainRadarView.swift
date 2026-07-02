@@ -64,10 +64,7 @@ struct RainRadarCardView: View {
                 }
             }
             .padding(16)
-            .background(Color.black.opacity(0.08))
-            .background(.white.opacity(0.11))
-            .background(.ultraThinMaterial.opacity(0.54))
-            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .glassCard()
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Regenradar öffnen")

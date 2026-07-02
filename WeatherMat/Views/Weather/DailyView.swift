@@ -48,10 +48,7 @@ struct DailyView: View {
                 }
             }
         }
-        .background(Color.black.opacity(0.08))
-        .background(.white.opacity(0.11))
-        .background(.ultraThinMaterial.opacity(0.54))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .glassCard()
     }
 
     private func confidence(for index: Int) -> ConfidenceLevel? {
@@ -80,7 +77,7 @@ struct DailyView: View {
                     }
                 } label: {
                     Text("\(available) Tage")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(.subheadline, weight: .bold))
                         .foregroundStyle(dayRange == range ? Color(hex: "#5b3b00") : .white.opacity(0.84))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
@@ -135,7 +132,7 @@ struct DailyRowView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(.callout, weight: .semibold))
                 .foregroundStyle(isSelected ? Color(hex: "#ffd166") : Color.white.opacity(0.28))
                 .frame(width: 17)
 
@@ -147,7 +144,7 @@ struct DailyRowView: View {
                     .minimumScaleFactor(0.8)
 
                 Text(dateLabel)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.62))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -157,7 +154,7 @@ struct DailyRowView: View {
             ZStack(alignment: .bottomTrailing) {
                 Image(systemName: day.condition.sfSymbol)
                     .symbolRenderingMode(.multicolor)
-                    .font(.system(size: 25))
+                    .font(.title)
                     .frame(width: 32)
                 if let confidence {
                     Circle()
@@ -181,7 +178,7 @@ struct DailyRowView: View {
 
             HStack(spacing: 6) {
                 Text("\(day.low)°")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.76))
                     .monospacedDigit()
                     .frame(width: 30, alignment: .trailing)
@@ -191,7 +188,7 @@ struct DailyRowView: View {
                     .frame(width: 60, height: 6)
 
                 Text("\(day.high)°")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(.headline, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
                     .frame(width: 30, alignment: .leading)
@@ -225,9 +222,9 @@ struct DailyRowView: View {
     private func metricLine(icon: String, text: String, color: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(.caption2, weight: .semibold))
             Text(text)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(.caption, weight: .bold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
