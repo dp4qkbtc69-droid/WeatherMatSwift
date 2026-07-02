@@ -49,6 +49,9 @@ targets:
         CFBundleDisplayName: WeatherMat
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
+        # App only uses standard HTTPS (exempt) — skips the export-compliance
+        # question on every TestFlight upload.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         NSLocationWhenInUseUsageDescription: "WeatherMat benötigt deinen Standort für lokale Wetterdaten."
         NSLocationAlwaysAndWhenInUseUsageDescription: "WeatherMat benötigt deinen Standort für lokale Wetterdaten."

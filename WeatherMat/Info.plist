@@ -35,6 +35,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>WeatherMat benötigt deinen Standort für lokale Wetterdaten.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
