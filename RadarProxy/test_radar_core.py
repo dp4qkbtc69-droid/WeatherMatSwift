@@ -48,6 +48,49 @@ class EnsureCacheTests(unittest.TestCase):
         self.assertIs(result[0], stale)
 
 
+class ApnsEnvironmentTests(unittest.TestCase):
+    """The proxy must reach both APNs environments off one server so Xcode
+    dev builds (sandbox) and TestFlight/App Store builds (production) both
+    receive push."""
+
+    def setUp(self) -> None:
+        self._orig = app._apns_post
+        self.calls = []
+
+    def tearDown(self) -> None:
+        app._apns_post = self._orig
+
+    def _stub(self, mapping):
+        def fake(device_token, env, **kwargs):
+            self.calls.append(env)
+            return mapping.get(env, "error")
+        app._apns_post = fake
+
+    def test_falls_back_to_the_other_environment(self) -> None:
+        # Token is a production token; sandbox is tried first and reports bad-env.
+        self._stub({"sandbox": "bad-env", "production": "ok"})
+        app.APNS_USE_SANDBOX = True
+        result, env = app._deliver_apns("tok", None, title="t", subtitle="", body="b",
+                                        collapse_id="c", critical=False)
+        self.assertEqual(result, "sent")
+        self.assertEqual(env, "production")
+        self.assertEqual(self.calls, ["sandbox", "production"])
+
+    def test_uses_learned_environment_first(self) -> None:
+        self._stub({"production": "ok", "sandbox": "ok"})
+        result, env = app._deliver_apns("tok", "production", title="t", subtitle="", body="b",
+                                        collapse_id="c", critical=False)
+        self.assertEqual((result, env), ("sent", "production"))
+        self.assertEqual(self.calls, ["production"])
+
+    def test_bad_in_both_environments_drops_token(self) -> None:
+        self._stub({"sandbox": "bad-env", "production": "bad-env"})
+        result, env = app._deliver_apns("tok", None, title="t", subtitle="", body="b",
+                                        collapse_id="c", critical=False)
+        self.assertEqual(result, "drop")
+        self.assertIsNone(env)
+
+
 class PaletteSyncTests(unittest.TestCase):
     """Guards the manual color sync between server (RAIN_COLOR_STEPS) and the
     iOS legend (RadarLegendStep.steps). Fails in CI if they drift apart."""

@@ -456,11 +456,15 @@ def _apns_bearer_token() -> str:
     return token
 
 
-def _send_apns(device_token: str, title: str, subtitle: str, body: str, collapse_id: str, critical: bool) -> bool:
-    """Returns False when the device token is gone (410) so the caller can drop it."""
+_APNS_HOSTS = {"production": "api.push.apple.com", "sandbox": "api.sandbox.push.apple.com"}
+
+
+def _apns_post(device_token: str, env: str, title: str, subtitle: str, body: str, collapse_id: str, critical: bool) -> str:
+    """One APNs request against the given environment. Returns:
+    'ok', 'bad-env' (token belongs to the other environment), 'drop'
+    (token gone), or 'error' (transient)."""
     import httpx
 
-    host = "api.sandbox.push.apple.com" if APNS_USE_SANDBOX else "api.push.apple.com"
     payload = {
         "aps": {
             "alert": {"title": title, "subtitle": subtitle, "body": body},
@@ -478,19 +482,53 @@ def _send_apns(device_token: str, title: str, subtitle: str, body: str, collapse
     }
     try:
         with httpx.Client(http2=True, timeout=15) as client:
-            response = client.post(f"https://{host}/3/device/{device_token}", json=payload, headers=headers)
+            response = client.post(
+                f"https://{_APNS_HOSTS[env]}/3/device/{device_token}", json=payload, headers=headers
+            )
         if response.status_code == 200:
             _metric_increment("pushSent")
-            return True
-        if response.status_code == 410:
-            logger.info("push token expired, dropping registration")
-            return False
+            return "ok"
+        reason = ""
+        try:
+            reason = (response.json() or {}).get("reason", "")
+        except Exception:
+            pass
+        if response.status_code == 410 or reason == "Unregistered":
+            return "drop"
+        if response.status_code == 400 and reason in {"BadDeviceToken", "BadEnvironmentKeyInToken"}:
+            return "bad-env"
         _metric_increment("pushErrors")
-        logger.warning("APNs %s: %s", response.status_code, response.text[:200])
+        logger.warning("APNs %s (%s): %s", response.status_code, env, reason or response.text[:120])
     except Exception as error:
         _metric_increment("pushErrors")
-        logger.warning("APNs send failed: %s", error)
-    return True
+        logger.warning("APNs send failed (%s): %s", env, error)
+    return "error"
+
+
+def _deliver_apns(device_token: str, prior_env: Optional[str], **kwargs) -> Tuple[str, Optional[str]]:
+    """Delivers to the correct APNs environment, auto-detecting sandbox vs
+    production per token so Xcode dev builds and TestFlight/App Store builds
+    both work off one server. Returns (result, working_env) with result in
+    {'sent', 'drop', 'error'}."""
+    default_first = "sandbox" if APNS_USE_SANDBOX else "production"
+    order: List[str] = []
+    for env in ([prior_env] if prior_env in _APNS_HOSTS else []) + [default_first, "production", "sandbox"]:
+        if env not in order:
+            order.append(env)
+
+    saw_bad_env = False
+    for env in order:
+        status = _apns_post(device_token, env, **kwargs)
+        if status == "ok":
+            return "sent", env
+        if status == "drop":
+            return "drop", None
+        if status == "bad-env":
+            saw_bad_env = True
+            continue
+        return "error", None
+    # Rejected as bad token by every environment → genuinely invalid, drop it.
+    return ("drop" if saw_bad_env else "error"), None
 
 
 def _fetch_alerts(lat: float, lon: float) -> List[Dict[str, Any]]:
@@ -533,6 +571,7 @@ def _poll_warnings_once() -> None:
     min_rank = _SEVERITY_RANK.get(APNS_MIN_SEVERITY, 1)
     dropped_tokens: List[str] = []
     newly_seen: Dict[str, List[str]] = {}
+    learned_env: Dict[str, str] = {}
 
     for token, entry in registrations.items():
         with _push_lock:
@@ -548,17 +587,22 @@ def _poll_warnings_once() -> None:
                     continue
                 if _SEVERITY_RANK.get(severity, 0) < min_rank:
                     continue
-                delivered = _send_apns(
-                    device_token=token,
+                result, working_env = _deliver_apns(
+                    token,
+                    entry.get("apnsEnv"),
                     title=_severity_title(severity),
                     subtitle=loc.get("name") or "",
                     body=headline,
                     collapse_id=f"dwd-{alert_id}",
                     critical=_SEVERITY_RANK.get(severity, 0) >= 2,
                 )
-                if not delivered:
+                if result == "drop":
                     dropped_tokens.append(token)
                     break
+                if result == "error":
+                    break  # transient — leave unseen so it retries next cycle
+                if working_env:
+                    learned_env[token] = working_env
                 seen.add(alert_id)
         newly_seen[token] = sorted(seen)[-200:]
 
@@ -567,9 +611,13 @@ def _poll_warnings_once() -> None:
             _push_state["registrations"].pop(token, None)
             _push_state["seen"].pop(token, None)
             newly_seen.pop(token, None)
+            learned_env.pop(token, None)
         for token, ids in newly_seen.items():
             if token in _push_state["registrations"]:
                 _push_state["seen"][token] = ids
+        for token, env in learned_env.items():
+            if token in _push_state["registrations"]:
+                _push_state["registrations"][token]["apnsEnv"] = env
         _save_push_state()
         _metric_set("pushRegistrations", len(_push_state["registrations"]))
     _metric_set("lastWarningPollAt", datetime.now(timezone.utc).isoformat())
@@ -593,8 +641,8 @@ def _start_warning_poll() -> None:
         logger.info("warning push inactive: APNs key not configured")
         return
     threading.Thread(target=_warning_poll_loop, daemon=True).start()
-    logger.info("warning push poller started (every %ss, %s)", WARNING_POLL_SECONDS,
-                "sandbox" if APNS_USE_SANDBOX else "production")
+    logger.info("warning push poller started (every %ss, auto sandbox+production, first try: %s)",
+                WARNING_POLL_SECONDS, "sandbox" if APNS_USE_SANDBOX else "production")
 
 
 

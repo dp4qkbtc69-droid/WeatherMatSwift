@@ -37,7 +37,9 @@ services:
       APNS_KEY_ID: "${APNS_KEY_ID:-}"
       APNS_KEY_PATH: "/apns/AuthKey.p8"
       APNS_TOPIC: "${APNS_TOPIC:-de.praxishartlep.weathermat}"
-      APNS_USE_SANDBOX: "${APNS_USE_SANDBOX:-true}"
+      # Which APNs environment to try first; the server falls back to the
+      # other per token automatically. Production-first suits TestFlight.
+      APNS_USE_SANDBOX: "${APNS_USE_SANDBOX:-false}"
       APNS_MIN_SEVERITY: "${APNS_MIN_SEVERITY:-Moderate}"
       PUSH_STATE_PATH: "/data/push_state.json"
     volumes:

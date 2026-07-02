@@ -69,7 +69,10 @@ targets:
       path: WeatherMat/WeatherMat.entitlements
       properties:
         com.apple.developer.weatherkit: true
-        aps-environment: development
+        # production is what TestFlight/App Store builds use; the proxy
+        # auto-detects sandbox vs production per token, so Xcode dev builds
+        # (sandbox) keep working too.
+        aps-environment: production
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.praxishartlep.weathermat
