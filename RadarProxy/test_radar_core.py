@@ -12,6 +12,42 @@ sys.path.insert(0, os.path.dirname(__file__))
 import app  # noqa: E402
 
 
+class EnsureCacheTests(unittest.TestCase):
+    """Regression guard for the _ensure_cache deadlock: serving a stale cache
+    called _schedule_refresh() while holding the non-reentrant _cache_lock,
+    which hung every later timeline/tile request until restart."""
+
+    def tearDown(self) -> None:
+        app._cache = None
+        app._refreshing = False
+
+    def test_stale_cache_is_served_without_deadlock(self) -> None:
+        import threading
+        import time
+
+        stale = app.RadarCache(
+            loaded_at=time.time() - (app.CACHE_SECONDS + 60),
+            frames=[],
+            tile_cache={},
+        )
+        app._cache = stale
+        # A refresh already "in flight" makes _schedule_refresh short-circuit
+        # without spawning a network thread, isolating the lock behaviour.
+        app._refreshing = True
+
+        result: list = []
+
+        def call() -> None:
+            result.append(app._ensure_cache())
+
+        worker = threading.Thread(target=call)
+        worker.start()
+        worker.join(timeout=5)
+
+        self.assertFalse(worker.is_alive(), "_ensure_cache deadlocked on a stale cache")
+        self.assertIs(result[0], stale)
+
+
 class RadarCoreTests(unittest.TestCase):
     def test_precipitation_type_uses_wet_area_fraction(self) -> None:
         intensity = np.array([[0.10, 0.20], [0.30, 0.40]])

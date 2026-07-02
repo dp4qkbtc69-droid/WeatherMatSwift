@@ -739,9 +739,15 @@ def _ensure_cache() -> RadarCache:
         cache = _cache
         if cache is not None and now - cache.loaded_at <= CACHE_SECONDS:
             return cache
-        if cache is not None:
-            _schedule_refresh()
-            return cache
+        stale_cache = cache
+
+    # A stale-but-present cache is served immediately while a refresh runs in
+    # the background. _schedule_refresh() acquires _cache_lock itself, so it
+    # must be called *after* releasing the lock above — otherwise the
+    # non-reentrant lock deadlocks and every later cache request hangs.
+    if stale_cache is not None:
+        _schedule_refresh()
+        return stale_cache
 
     with _cache_build_lock:
         with _cache_lock:
