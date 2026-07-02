@@ -25,49 +25,6 @@ Then add this key to `WeatherMat/LocalConfig.plist`:
 For a real iPhone build, deploy this service to a small server and use the HTTPS
 URL instead of `127.0.0.1`.
 
-## Serverless Deploy With GitHub Pages
-
-This is the no-running-server option. A GitHub Actions workflow renders the DWD
-radar frames into static PNG tiles every 15 minutes and publishes them to GitHub
-Pages.
-
-1. Push the repository to GitHub.
-2. In GitHub, open `Settings > Pages`.
-3. Set `Build and deployment` to `GitHub Actions`.
-4. Run the workflow `Publish DWD Radar Tiles` once manually, or wait for the
-   schedule.
-5. Use the Pages URL as the app base URL.
-
-For a project page the URL usually looks like:
-
-```xml
-<key>dwdRadarTileBaseURL</key>
-<string>https://USER.github.io/REPOSITORY</string>
-```
-
-For a custom domain, configure the domain in GitHub Pages and use:
-
-```xml
-<key>dwdRadarTileBaseURL</key>
-<string>https://radar.example.com</string>
-```
-
-Generated files:
-
-- `timeline.json`
-- `health`
-- `tiles/{frame_id}/{z}/{x}/{y}.png`
-
-The default workflow renders zoom levels `4...7`, then the app upscales/crops
-the highest available radar tile for closer zooms. This keeps static hosting
-storage and GitHub Actions runtime reasonable enough for the 15-minute refresh
-cadence.
-
-For the serverless build the past 24 hours are sampled hourly, while the current
-DWD package keeps the recent/nowcast frames denser. Rendering every past
-15-minute archive on every scheduled GitHub Actions run is too heavy for a free
-static Pages setup.
-
 ## Server Deploy With HTTPS
 
 Recommended target: a small VPS with Docker and Docker Compose. Point a DNS
