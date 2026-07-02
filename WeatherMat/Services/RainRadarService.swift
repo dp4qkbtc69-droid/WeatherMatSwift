@@ -106,7 +106,11 @@ enum RainRadarService {
 
     private static func fetchDwdTimeline(baseURL: URL) async throws -> RainRadarTimeline {
         let timelineURL = baseURL.appending(path: "timeline.json")
-        let (data, response) = try await URLSession.shared.data(for: authenticatedDwdRadarRequest(timelineURL))
+        // Short timeout so a hung/slow proxy surfaces as a retryable error
+        // quickly instead of holding the "loading" state for the 60 s default.
+        var request = authenticatedDwdRadarRequest(timelineURL)
+        request.timeoutInterval = 12
+        let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
