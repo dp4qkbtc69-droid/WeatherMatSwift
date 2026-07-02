@@ -4,6 +4,7 @@ import bz2
 import hashlib
 import hmac
 import io
+import json
 import logging
 import math
 import os
@@ -23,6 +24,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from PIL import Image
+from pydantic import BaseModel, Field
 
 
 logging.basicConfig(
@@ -99,6 +101,17 @@ RAIN_COLOR_STEPS = (
     (4.0, 8.0, (242, 140, 40, 220)),
     (8.0, 9999.0, (217, 48, 37, 238)),
 )
+
+# --- DWD warning push (APNs) ---
+APNS_TEAM_ID = os.environ.get("APNS_TEAM_ID", "")
+APNS_KEY_ID = os.environ.get("APNS_KEY_ID", "")
+APNS_KEY_PATH = os.environ.get("APNS_KEY_PATH", "")
+APNS_TOPIC = os.environ.get("APNS_TOPIC", "de.praxishartlep.weathermat")
+APNS_USE_SANDBOX = os.environ.get("APNS_USE_SANDBOX", "true").lower() in {"1", "true", "yes"}
+APNS_MIN_SEVERITY = os.environ.get("APNS_MIN_SEVERITY", "Moderate")
+WARNING_POLL_SECONDS = int(os.environ.get("WARNING_POLL_SECONDS", "300"))
+PUSH_STATE_PATH = Path(os.environ.get("PUSH_STATE_PATH", "push_state.json"))
+_SEVERITY_RANK = {"Minor": 0, "Moderate": 1, "Severe": 2, "Extreme": 3}
 TILE_CACHE_VERSION = os.environ.get("RADAR_TILE_CACHE_VERSION", APP_VERSION)
 WEB_MERCATOR_LIMIT = 20037508.342789244
 
@@ -194,6 +207,7 @@ _transparent_tile: bytes | None = None
 @app.on_event("startup")
 def startup() -> None:
     _start_refresh_loop()
+    _start_warning_poll()
 
 
 @app.get("/ping")
@@ -339,6 +353,245 @@ def metrics(request: Request) -> dict:
         "metrics": _metrics_snapshot(),
         "hotspots": _dynamic_hotspots_snapshot(),
     }
+
+# --- Warning push: registration + APNs delivery ---
+
+class PushLocation(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    name: str = ""
+
+
+class PushRegistration(BaseModel):
+    token: str = Field(min_length=32, max_length=200)
+    locations: List[PushLocation] = Field(max_length=12)
+
+
+class PushUnregistration(BaseModel):
+    token: str = Field(min_length=32, max_length=200)
+
+
+_push_lock = threading.Lock()
+_push_state: Dict[str, Any] = {"registrations": {}, "seen": {}}
+_push_state_loaded = False
+_apns_jwt_cache: Tuple[str, float] | None = None
+_warning_poll_started = False
+
+
+def _push_configured() -> bool:
+    return bool(APNS_TEAM_ID and APNS_KEY_ID and APNS_KEY_PATH and Path(APNS_KEY_PATH).exists())
+
+
+def _load_push_state() -> None:
+    global _push_state, _push_state_loaded
+    if _push_state_loaded:
+        return
+    _push_state_loaded = True
+    try:
+        if PUSH_STATE_PATH.exists():
+            data = json.loads(PUSH_STATE_PATH.read_text())
+            if isinstance(data, dict):
+                _push_state = {
+                    "registrations": data.get("registrations", {}),
+                    "seen": data.get("seen", {}),
+                }
+    except (OSError, ValueError) as error:
+        logger.warning("push state unreadable, starting fresh: %s", error)
+
+
+def _save_push_state() -> None:
+    try:
+        PUSH_STATE_PATH.write_text(json.dumps(_push_state))
+    except OSError as error:
+        logger.warning("push state write failed: %s", error)
+
+
+@app.post("/push/register")
+def push_register(request: Request, payload: PushRegistration) -> dict:
+    _require_token(request)
+    with _push_lock:
+        _load_push_state()
+        _push_state["registrations"][payload.token] = {
+            "locations": [loc.model_dump() for loc in payload.locations],
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_push_state()
+        count = len(_push_state["registrations"])
+    _metric_set("pushRegistrations", count)
+    return {"ok": True, "registrations": count, "pushConfigured": _push_configured()}
+
+
+@app.post("/push/unregister")
+def push_unregister(request: Request, payload: PushUnregistration) -> dict:
+    _require_token(request)
+    with _push_lock:
+        _load_push_state()
+        _push_state["registrations"].pop(payload.token, None)
+        _push_state["seen"].pop(payload.token, None)
+        _save_push_state()
+        count = len(_push_state["registrations"])
+    _metric_set("pushRegistrations", count)
+    return {"ok": True, "registrations": count}
+
+
+def _apns_bearer_token() -> str:
+    global _apns_jwt_cache
+    now = time.time()
+    if _apns_jwt_cache is not None and now - _apns_jwt_cache[1] < 45 * 60:
+        return _apns_jwt_cache[0]
+    import jwt as pyjwt
+
+    key = Path(APNS_KEY_PATH).read_text()
+    token = pyjwt.encode(
+        {"iss": APNS_TEAM_ID, "iat": int(now)},
+        key,
+        algorithm="ES256",
+        headers={"kid": APNS_KEY_ID},
+    )
+    _apns_jwt_cache = (token, now)
+    return token
+
+
+def _send_apns(device_token: str, title: str, subtitle: str, body: str, collapse_id: str, critical: bool) -> bool:
+    """Returns False when the device token is gone (410) so the caller can drop it."""
+    import httpx
+
+    host = "api.sandbox.push.apple.com" if APNS_USE_SANDBOX else "api.push.apple.com"
+    payload = {
+        "aps": {
+            "alert": {"title": title, "subtitle": subtitle, "body": body},
+            "sound": "default",
+            "thread-id": "dwd-warnings",
+            "interruption-level": "time-sensitive" if critical else "active",
+        }
+    }
+    headers = {
+        "authorization": f"bearer {_apns_bearer_token()}",
+        "apns-topic": APNS_TOPIC,
+        "apns-push-type": "alert",
+        "apns-priority": "10",
+        "apns-collapse-id": collapse_id[:64],
+    }
+    try:
+        with httpx.Client(http2=True, timeout=15) as client:
+            response = client.post(f"https://{host}/3/device/{device_token}", json=payload, headers=headers)
+        if response.status_code == 200:
+            _metric_increment("pushSent")
+            return True
+        if response.status_code == 410:
+            logger.info("push token expired, dropping registration")
+            return False
+        _metric_increment("pushErrors")
+        logger.warning("APNs %s: %s", response.status_code, response.text[:200])
+    except Exception as error:
+        _metric_increment("pushErrors")
+        logger.warning("APNs send failed: %s", error)
+    return True
+
+
+def _fetch_alerts(lat: float, lon: float) -> List[Dict[str, Any]]:
+    url = f"https://api.brightsky.dev/alerts?lat={lat:.4f}&lon={lon:.4f}"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            data = json.loads(response.read())
+        return data.get("alerts") or []
+    except Exception as error:
+        logger.warning("alert fetch failed for %.2f,%.2f: %s", lat, lon, error)
+        return []
+
+
+def _severity_title(severity: str) -> str:
+    return {
+        "Minor": "DWD Wetterhinweis",
+        "Moderate": "DWD Wetterwarnung",
+        "Severe": "DWD Unwetterwarnung",
+        "Extreme": "DWD Extreme Unwetterwarnung",
+    }.get(severity, "DWD Wetterwarnung")
+
+
+def _poll_warnings_once() -> None:
+    with _push_lock:
+        _load_push_state()
+        registrations = {
+            token: dict(entry) for token, entry in _push_state["registrations"].items()
+        }
+    if not registrations:
+        return
+
+    # One alerts request per distinct (rounded) coordinate, shared by all devices.
+    coord_alerts: Dict[Tuple[float, float], List[Dict[str, Any]]] = {}
+    for entry in registrations.values():
+        for loc in entry.get("locations", []):
+            coord_alerts.setdefault((round(loc["lat"], 2), round(loc["lon"], 2)), [])
+    for coord in coord_alerts:
+        coord_alerts[coord] = _fetch_alerts(coord[0], coord[1])
+
+    min_rank = _SEVERITY_RANK.get(APNS_MIN_SEVERITY, 1)
+    dropped_tokens: List[str] = []
+    newly_seen: Dict[str, List[str]] = {}
+
+    for token, entry in registrations.items():
+        with _push_lock:
+            seen = set(_push_state["seen"].get(token, []))
+        for loc in entry.get("locations", []):
+            coord = (round(loc["lat"], 2), round(loc["lon"], 2))
+            for alert in coord_alerts.get(coord, []):
+                alert_id = str(alert.get("id") or "")
+                event = alert.get("event_de") or ""
+                headline = alert.get("headline_de") or event
+                severity = alert.get("severity") or "Minor"
+                if not alert_id or f"{alert_id}" in seen:
+                    continue
+                if _SEVERITY_RANK.get(severity, 0) < min_rank:
+                    continue
+                delivered = _send_apns(
+                    device_token=token,
+                    title=_severity_title(severity),
+                    subtitle=loc.get("name") or "",
+                    body=headline,
+                    collapse_id=f"dwd-{alert_id}",
+                    critical=_SEVERITY_RANK.get(severity, 0) >= 2,
+                )
+                if not delivered:
+                    dropped_tokens.append(token)
+                    break
+                seen.add(alert_id)
+        newly_seen[token] = sorted(seen)[-200:]
+
+    with _push_lock:
+        for token in dropped_tokens:
+            _push_state["registrations"].pop(token, None)
+            _push_state["seen"].pop(token, None)
+            newly_seen.pop(token, None)
+        for token, ids in newly_seen.items():
+            if token in _push_state["registrations"]:
+                _push_state["seen"][token] = ids
+        _save_push_state()
+        _metric_set("pushRegistrations", len(_push_state["registrations"]))
+    _metric_set("lastWarningPollAt", datetime.now(timezone.utc).isoformat())
+
+
+def _warning_poll_loop() -> None:
+    while True:
+        time.sleep(max(60, WARNING_POLL_SECONDS))
+        try:
+            _poll_warnings_once()
+        except Exception as error:
+            logger.error("warning poll failed: %s", error)
+
+
+def _start_warning_poll() -> None:
+    global _warning_poll_started
+    if _warning_poll_started:
+        return
+    _warning_poll_started = True
+    if not _push_configured():
+        logger.info("warning push inactive: APNs key not configured")
+        return
+    threading.Thread(target=_warning_poll_loop, daemon=True).start()
+    logger.info("warning push poller started (every %ss, %s)", WARNING_POLL_SECONDS,
+                "sandbox" if APNS_USE_SANDBOX else "production")
+
 
 
 def _require_token(request: Request) -> None:

@@ -3,3 +3,6 @@ eccodes>=2.36,<3
 numpy==2.0.2
 pillow==11.0.0
 uvicorn[standard]==0.34.0
+httpx[http2]==0.28.1
+PyJWT==2.10.1
+cryptography>=43

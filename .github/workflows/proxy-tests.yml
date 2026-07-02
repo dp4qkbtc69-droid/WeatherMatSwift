@@ -18,6 +18,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install fastapi numpy pillow
+        run: pip install fastapi numpy pillow httpx
       - name: Run radar core tests
         run: python RadarProxy/test_radar_core.py

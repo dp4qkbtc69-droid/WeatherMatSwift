@@ -101,3 +101,31 @@ Optional environment variables:
 The proxy can technically run anywhere with Python 3.12 and enough memory, but
 the clean production setup is a VPS/container host with the bundled Caddy
 setup for HTTPS (see "Server Deploy With HTTPS" above).
+
+## DWD Warning Push (APNs)
+
+The proxy polls BrightSky/DWD alerts for all registered device locations
+(every `WARNING_POLL_SECONDS`, default 300) and delivers new warnings at or
+above `APNS_MIN_SEVERITY` (default `Moderate`) via APNs. The app registers its
+device token and saved locations automatically at `POST /push/register`.
+
+One-time setup:
+
+1. Create an APNs auth key at developer.apple.com under
+   `Certificates, Identifiers & Profiles > Keys` (enable "Apple Push
+   Notifications service"). Download the `AuthKey_XXXXXXXXXX.p8` file —
+   it can only be downloaded once.
+2. Copy it to the server as `/opt/weathermat-radar/apns/AuthKey.p8`.
+3. Add to `.env`:
+
+```
+APNS_TEAM_ID=5P532N3MK4
+APNS_KEY_ID=XXXXXXXXXX      # the 10-char id from the key name
+APNS_USE_SANDBOX=true       # true for Xcode/debug builds, false for TestFlight/App Store
+```
+
+4. `docker compose up -d --build`
+
+`/health` metrics show `pushRegistrations`, `pushSent`, `pushErrors`.
+Without a configured key the poller stays off and the app falls back to
+local warning notifications.

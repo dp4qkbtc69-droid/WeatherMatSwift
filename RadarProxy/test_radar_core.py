@@ -53,5 +53,49 @@ class RadarCoreTests(unittest.TestCase):
         )
 
 
+
+class PushRegistrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from fastapi.testclient import TestClient
+        import tempfile, pathlib
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        app.PUSH_STATE_PATH = pathlib.Path(self.tmp.name)
+        app._push_state = {"registrations": {}, "seen": {}}
+        app._push_state_loaded = True
+        self.client = TestClient(app.app)
+        self.headers = {"x-radar-token": "test-token"}
+        self.token = "a" * 64
+
+    def test_register_and_unregister_roundtrip(self) -> None:
+        payload = {"token": self.token, "locations": [{"lat": 50.1, "lon": 9.1, "name": "Alzenau"}]}
+        response = self.client.post("/push/register", json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["registrations"], 1)
+        self.assertFalse(body["pushConfigured"])
+
+        response = self.client.post("/push/unregister", json={"token": self.token}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["registrations"], 0)
+
+    def test_register_requires_token(self) -> None:
+        payload = {"token": self.token, "locations": []}
+        response = self.client.post("/push/register", json=payload)
+        self.assertEqual(response.status_code, 401)
+
+    def test_register_rejects_invalid_coordinates(self) -> None:
+        payload = {"token": self.token, "locations": [{"lat": 123.0, "lon": 9.1, "name": "kaputt"}]}
+        response = self.client.post("/push/register", json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+
+    def test_poll_without_registrations_is_noop(self) -> None:
+        app._poll_warnings_once()
+
+    def test_severity_titles_cover_all_levels(self) -> None:
+        for severity in ["Minor", "Moderate", "Severe", "Extreme"]:
+            self.assertTrue(app._severity_title(severity).startswith("DWD"))
+
+
 if __name__ == "__main__":
     unittest.main()

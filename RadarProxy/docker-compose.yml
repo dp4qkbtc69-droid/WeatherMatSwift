@@ -29,6 +29,16 @@ services:
       DWD_RADAR_HOTSPOT_LON: "${DWD_RADAR_HOTSPOT_LON:-9.064}"
       DWD_RADAR_HOTSPOT_RADIUS_TILES: "${DWD_RADAR_HOTSPOT_RADIUS_TILES:-1}"
       DWD_RADAR_HOTSPOT_ZOOMS: "${DWD_RADAR_HOTSPOT_ZOOMS:-8,9,10,11,12}"
+      APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
+      APNS_KEY_ID: "${APNS_KEY_ID:-}"
+      APNS_KEY_PATH: "/apns/AuthKey.p8"
+      APNS_TOPIC: "${APNS_TOPIC:-de.praxishartlep.weathermat}"
+      APNS_USE_SANDBOX: "${APNS_USE_SANDBOX:-true}"
+      APNS_MIN_SEVERITY: "${APNS_MIN_SEVERITY:-Moderate}"
+      PUSH_STATE_PATH: "/data/push_state.json"
+    volumes:
+      - ./apns:/apns:ro
+      - push_data:/data
     expose:
       - "8787"
     logging:
@@ -66,3 +76,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  push_data:
