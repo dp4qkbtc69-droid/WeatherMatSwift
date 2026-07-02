@@ -1,20 +1,35 @@
 from __future__ import annotations
 
 import bz2
+import hashlib
+import hmac
 import io
+import logging
 import math
 import os
+from pathlib import Path
 import tarfile
+import tempfile
+import threading
 import time
+import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import xml.etree.ElementTree as ET
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from PIL import Image
+
+
+logging.basicConfig(
+    level=os.environ.get("RADAR_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("radar-proxy")
 
 
 DWD_RV_URL = os.environ.get(
@@ -25,22 +40,82 @@ DWD_RV_INDEX_URL = os.environ.get(
     "DWD_RV_INDEX_URL",
     "https://opendata.dwd.de/weather/radar/composite/rv/",
 )
+DWD_WMS_URL = os.environ.get(
+    "DWD_WMS_URL",
+    "https://maps.dwd.de/geoserver/dwd/ows",
+)
+DWD_WMS_LAYER = os.environ.get("DWD_WMS_LAYER", "Radar_rv_product_1x1km_ger")
+ICON_FORECAST_HOURS = int(os.environ.get("DWD_ICON_FORECAST_HOURS", "120"))
+ICON_RAW_FORECAST_HOURS = int(os.environ.get("DWD_ICON_RAW_FORECAST_HOURS", "72"))
+ICON_RAW_MAX_FRAMES = int(os.environ.get("DWD_ICON_RAW_MAX_FRAMES", "72"))
+ICON_RAW_STEP_HOURS = int(os.environ.get("DWD_ICON_RAW_STEP_HOURS", "1"))
+ICON_RAW_BASE_URL = os.environ.get("DWD_ICON_RAW_BASE_URL", "https://opendata.dwd.de/weather/nwp/icon-eu/grib/")
+DISK_CACHE_MAX_AGE_SECONDS = int(os.environ.get("DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS", "86400"))
+DISK_CACHE_PRUNE_INTERVAL_SECONDS = int(os.environ.get("DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS", "3600"))
+NATIVE_FRAME_STEP_MINUTES = int(os.environ.get("DWD_RADAR_NATIVE_FRAME_STEP_MINUTES", "10"))
+ICON_WMS_RECOLOR = os.environ.get("DWD_ICON_WMS_RECOLOR", "true").lower() in {"1", "true", "yes"}
+ICON_RAW_MODE = os.environ.get("DWD_ICON_RAW_MODE", "auto").lower()
+ICON_PRECIP_LAYERS = [
+    item.strip()
+    for item in os.environ.get(
+        "DWD_ICON_PRECIP_LAYERS",
+        "Icon-eu_reg00625_fd_sl_TOTPREC01H,Icon-eu_reg00625_fd_sl_TOTPREC03H,Icon_reg025_fd_sl_TOTPREC,Aicon_reg025_fd_sl_TOTPREC",
+    ).split(",")
+    if item.strip()
+]
+DWD_RADAR_RENDER_MODE = os.environ.get("DWD_RADAR_RENDER_MODE", "native").lower()
 CACHE_SECONDS = int(os.environ.get("DWD_RADAR_CACHE_SECONDS", "240"))
 PAST_HOURS = int(os.environ.get("DWD_RADAR_PAST_HOURS", "24"))
 PAST_STEP_MINUTES = int(os.environ.get("DWD_RADAR_PAST_STEP_MINUTES", "15"))
+BACKGROUND_HISTORY = os.environ.get("DWD_RADAR_BACKGROUND_HISTORY", "").lower() in {"1", "true", "yes"}
+REFRESH_INTERVAL_SECONDS = int(os.environ.get("DWD_RADAR_REFRESH_INTERVAL_SECONDS", "300"))
+STARTUP_WARM = os.environ.get("DWD_RADAR_STARTUP_WARM", "true").lower() in {"1", "true", "yes"}
+WARM_TILES = os.environ.get("DWD_RADAR_WARM_TILES", "true").lower() in {"1", "true", "yes"}
+WARM_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_WARM_FRAME_LIMIT", "25"))
+WARM_DETAIL_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_WARM_DETAIL_FRAME_LIMIT", "6"))
+WARM_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_WARM_ZOOMS", "5,6").split(",") if item.strip())
+WARM_DETAIL_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_WARM_DETAIL_ZOOMS", "7").split(",") if item.strip())
+TILE_MAX_ZOOM = int(os.environ.get("DWD_RADAR_TILE_MAX_ZOOM", "13"))
+HOTSPOT_WARM = os.environ.get("DWD_RADAR_HOTSPOT_WARM", "true").lower() in {"1", "true", "yes"}
+HOTSPOT_LAT = float(os.environ.get("DWD_RADAR_HOTSPOT_LAT", "50.088"))
+HOTSPOT_LON = float(os.environ.get("DWD_RADAR_HOTSPOT_LON", "9.064"))
+HOTSPOT_RADIUS_TILES = int(os.environ.get("DWD_RADAR_HOTSPOT_RADIUS_TILES", "1"))
+HOTSPOT_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_ZOOMS", "8,9").split(",") if item.strip())
+RADAR_PROXY_TOKEN = os.environ.get("RADAR_PROXY_TOKEN") or os.environ.get("WEATHERMAT_RADAR_TOKEN") or ""
+DISK_CACHE_DIR = Path(os.environ["RADAR_DISK_CACHE_DIR"]) if os.environ.get("RADAR_DISK_CACHE_DIR") else None
 TILE_SIZE = 512
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
+APP_VERSION = "hybrid-palette-2026-07-02"
 
-# Practical coverage of the DE1200 composite for a MapKit overlay. The official
-# RADOLAN projection is polar stereographic; for app-sized radar inspection this
-# georeferenced crop keeps Germany aligned closely enough while the proxy stays
-# lightweight and deployable.
+# Hybrid rain palette: blue for light/moderate rain, warning colors
+# (yellow/orange/red) from "kraeftig" upwards. Must stay in sync with
+# RadarLegendStep.steps in the iOS client.
+RAIN_COLOR_STEPS = (
+    (0.01, 0.3, (207, 238, 253, 105)),
+    (0.3, 0.8, (111, 197, 247, 135)),
+    (0.8, 1.8, (42, 120, 214, 165)),
+    (1.8, 4.0, (247, 208, 56, 195)),
+    (4.0, 8.0, (242, 140, 40, 220)),
+    (8.0, 9999.0, (217, 48, 37, 238)),
+)
+TILE_CACHE_VERSION = os.environ.get("RADAR_TILE_CACHE_VERSION", APP_VERSION)
+WEB_MERCATOR_LIMIT = 20037508.342789244
+
+# Practical coverage of the DE1200 composite for the legacy raster renderer.
+# For WMS mode the DWD service itself clips the layer; keep this broad enough
+# that valid edge tiles are not discarded before the WMS request is made.
 RADAR_BBOX = (
-    float(os.environ.get("DWD_RADAR_WEST", "1.5")),
-    float(os.environ.get("DWD_RADAR_SOUTH", "45.2")),
-    float(os.environ.get("DWD_RADAR_EAST", "16.8")),
-    float(os.environ.get("DWD_RADAR_NORTH", "55.6")),
+    float(os.environ.get("DWD_RADAR_WEST", "1.4")),
+    float(os.environ.get("DWD_RADAR_SOUTH", "45.6")),
+    float(os.environ.get("DWD_RADAR_EAST", "18.8")),
+    float(os.environ.get("DWD_RADAR_NORTH", "56.3")),
+)
+WARM_BBOX = (
+    float(os.environ.get("DWD_RADAR_WARM_WEST", "4.7")),
+    float(os.environ.get("DWD_RADAR_WARM_SOUTH", "46.7")),
+    float(os.environ.get("DWD_RADAR_WARM_EAST", "16.0")),
+    float(os.environ.get("DWD_RADAR_WARM_NORTH", "55.4")),
 )
 
 
@@ -50,6 +125,9 @@ class RadarFrame:
     time: datetime
     is_forecast: bool
     image: Image.Image
+    layer_name: str | None = None
+    reference_time: datetime | None = None
+    precipitation_type: str = "unknown"
 
 
 @dataclass
@@ -57,30 +135,116 @@ class RadarCache:
     loaded_at: float
     frames: List[RadarFrame]
     tile_cache: Dict[Tuple[str, int, int, int], bytes]
+    tile_cache_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 app = FastAPI(title="WeatherMat DWD Radar Proxy")
 _cache: RadarCache | None = None
+_cache_lock = threading.Lock()
+_cache_build_lock = threading.Lock()
+_refreshing = False
+_refresh_loop_started = False
+_warm_lock = threading.Lock()
+_warming = False
+_warmed_cache_id: float | None = None
+_warm_stats = {
+    "lastStartedAt": None,
+    "lastFinishedAt": None,
+    "lastCacheId": None,
+    "rendered": 0,
+    "reused": 0,
+    "frames": 0,
+}
+_dynamic_hotspots: List[Tuple[float, float]] = []
+_dynamic_hotspots_lock = threading.Lock()
+_icon_raw_cache_lock = threading.Lock()
+_icon_raw_cache: Dict[str, Any] = {
+    "referenceTime": None,
+    "runHour": None,
+    "frames": [],
+}
+_last_disk_prune_at = 0.0
+_last_disk_prune_lock = threading.Lock()
+_metrics_lock = threading.Lock()
+_metrics: Dict[str, Any] = {
+    "startedAt": datetime.now(timezone.utc).isoformat(),
+    "refreshCount": 0,
+    "refreshErrors": 0,
+    "lastRefreshStartedAt": None,
+    "lastRefreshFinishedAt": None,
+    "lastRefreshDurationSeconds": None,
+    "lastRefreshError": None,
+    "tileRequests": 0,
+    "tileRendered": 0,
+    "tileMemoryHits": 0,
+    "tileDiskHits": 0,
+    "tileErrors": 0,
+    "wmsTileFailures": 0,
+    "iconRawFrames": 0,
+    "iconRawFailures": 0,
+    "iconWmsFrames": 0,
+    "lastIconRawRun": None,
+    "lastIconRawCandidates": [],
+    "iconRawCacheHits": 0,
+    "diskCachePrunedFiles": 0,
+}
 _transparent_tile: bytes | None = None
 
 
+@app.on_event("startup")
+def startup() -> None:
+    _start_refresh_loop()
+
+
+@app.get("/ping")
+def ping() -> dict:
+    # Unauthenticated liveness probe for external uptime monitoring.
+    # Deliberately returns no version or cache details.
+    return {"ok": True}
+
+
 @app.get("/health")
-def health() -> dict:
-    cache = _ensure_cache()
-    return {"ok": True, "frames": len(cache.frames), "loadedAt": cache.loaded_at}
+def health(request: Request) -> dict:
+    _require_token(request)
+    cache = _cache
+    return {
+        "ok": True,
+        "version": APP_VERSION,
+        "renderMode": DWD_RADAR_RENDER_MODE,
+        "iconMode": ICON_RAW_MODE,
+        "capabilities": _capabilities(),
+        "frames": len(cache.frames) if cache is not None else 0,
+        "loadedAt": cache.loaded_at if cache is not None else None,
+        "refreshing": _refreshing,
+        "refreshIntervalSeconds": REFRESH_INTERVAL_SECONDS,
+        "warming": _warming,
+        "warmStats": _warm_stats,
+        "metrics": _metrics_snapshot(),
+    }
 
 
 @app.get("/timeline.json")
-def timeline() -> dict:
-    cache = _ensure_cache()
+def timeline(request: Request) -> dict:
+    _require_token(request)
+    try:
+        cache = _ensure_cache()
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=f"Radar cache build failed: {error}") from error
     return {
-        "source": "DWD OpenData RV",
+        "source": "WeatherMat RadarEngine · DWD RV Rohdaten/ICON-EU",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "tileMaxZoom": 18 if DWD_RADAR_RENDER_MODE == "wms" else TILE_MAX_ZOOM,
+        "iconMode": ICON_RAW_MODE,
+        "capabilities": _capabilities(),
         "frames": [
             {
                 "id": frame.frame_id,
                 "time": frame.time.isoformat(),
                 "isForecast": frame.is_forecast,
+                "source": _frame_source(frame),
+                "referenceTime": frame.reference_time.isoformat() if frame.reference_time else None,
+                "renderVersion": APP_VERSION,
+                "precipitationType": frame.precipitation_type,
             }
             for frame in cache.frames
         ],
@@ -88,45 +252,458 @@ def timeline() -> dict:
 
 
 @app.get("/tiles/{frame_id}/{z}/{x}/{y}.png")
-def tile(frame_id: str, z: int, x: int, y: int) -> Response:
-    cache = _ensure_cache()
+def tile(request: Request, frame_id: str, z: int, x: int, y: int) -> Response:
+    _require_token(request)
+    try:
+        cache = _ensure_cache()
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=f"Radar cache build failed: {error}") from error
     frame = next((item for item in cache.frames if item.frame_id == frame_id), None)
     if frame is None:
         raise HTTPException(status_code=404, detail="Unknown radar frame")
 
-    key = (frame_id, z, x, y)
-    data = cache.tile_cache.get(key)
+    _metric_increment("tileRequests")
+    data, _ = _tile_bytes(cache, frame, z, x, y)
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "public, max-age=600"})
+
+
+def _frame_source(frame: RadarFrame) -> str:
+    if frame.layer_name and frame.layer_name != DWD_WMS_LAYER:
+        return "icon-eu-wms"
+    if frame.frame_id.startswith("iconraw--"):
+        return "icon-eu-raw"
+    if frame.layer_name == DWD_WMS_LAYER:
+        return "dwd-radar-wms"
+    return "dwd-rv"
+
+
+def _capabilities() -> dict:
+    icon_raw_available = _icon_raw_decoder_available()
+    return {
+        "nativeDwdRv": DWD_RADAR_RENDER_MODE in {"native", "hybrid", "raw"},
+        "serverRenderedTiles": True,
+        "iconForecast": bool(ICON_PRECIP_LAYERS),
+        "iconRawGrib": icon_raw_available,
+        "precipitationType": "rain-snow-when-raw",
+        "hotspotWarm": HOTSPOT_WARM,
+        "hotspotZooms": list(HOTSPOT_ZOOMS),
+        "tileMaxZoom": TILE_MAX_ZOOM,
+    }
+
+
+@app.get("/warm")
+def warm(request: Request) -> dict:
+    _require_token(request)
+    cache = _ensure_cache()
+    scheduled = _schedule_tile_warm(cache)
+    return {
+        "ok": True,
+        "scheduled": scheduled,
+        "warming": _warming,
+        "warmStats": _warm_stats,
+    }
+
+
+@app.post("/warm-location")
+@app.get("/warm-location")
+def warm_location(request: Request, lat: float, lon: float) -> dict:
+    _require_token(request)
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise HTTPException(status_code=400, detail="Invalid coordinate")
+    with _dynamic_hotspots_lock:
+        point = (round(lat, 4), round(lon, 4))
+        _dynamic_hotspots[:] = [item for item in _dynamic_hotspots if item != point]
+        _dynamic_hotspots.insert(0, point)
+        del _dynamic_hotspots[8:]
+    cache = _ensure_cache()
+    scheduled = _schedule_tile_warm(cache, force=True)
+    return {
+        "ok": True,
+        "scheduled": scheduled,
+        "hotspots": _dynamic_hotspots_snapshot(),
+        "warmStats": _warm_stats,
+    }
+
+
+@app.get("/metrics")
+def metrics(request: Request) -> dict:
+    _require_token(request)
+    cache = _cache
+    return {
+        "ok": True,
+        "version": APP_VERSION,
+        "frames": len(cache.frames) if cache is not None else 0,
+        "loadedAt": cache.loaded_at if cache is not None else None,
+        "warming": _warming,
+        "warmStats": _warm_stats,
+        "metrics": _metrics_snapshot(),
+        "hotspots": _dynamic_hotspots_snapshot(),
+    }
+
+
+def _require_token(request: Request) -> None:
+    if not RADAR_PROXY_TOKEN:
+        return
+    supplied = request.query_params.get("token") or request.headers.get("x-radar-token") or ""
+    if not supplied or not _constant_time_equals(supplied, RADAR_PROXY_TOKEN):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _constant_time_equals(lhs: str, rhs: str) -> bool:
+    return hmac.compare_digest(lhs, rhs)
+
+
+def _metric_increment(name: str, amount: int = 1) -> None:
+    with _metrics_lock:
+        _metrics[name] = int(_metrics.get(name, 0)) + amount
+
+
+def _metric_set(name: str, value: Any) -> None:
+    with _metrics_lock:
+        _metrics[name] = value
+
+
+def _metrics_snapshot() -> Dict[str, Any]:
+    with _metrics_lock:
+        return dict(_metrics)
+
+
+def _dynamic_hotspots_snapshot() -> List[Dict[str, float]]:
+    with _dynamic_hotspots_lock:
+        return [{"lat": lat, "lon": lon} for lat, lon in _dynamic_hotspots]
+
+
+def _icon_raw_decoder_available() -> bool:
+    try:
+        import eccodes  # type: ignore  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _disk_tile_path(frame_id: str, z: int, x: int, y: int) -> Path | None:
+    if DISK_CACHE_DIR is None:
+        return None
+    digest = hashlib.sha1(f"{TILE_CACHE_VERSION}|{frame_id}".encode("utf-8")).hexdigest()
+    return DISK_CACHE_DIR / "tiles" / digest[:2] / digest / str(z) / str(x) / f"{y}.png"
+
+
+def _read_disk_tile(frame_id: str, z: int, x: int, y: int) -> bytes | None:
+    path = _disk_tile_path(frame_id, z, x, y)
+    if path is None or not path.exists():
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _write_disk_tile(frame_id: str, z: int, x: int, y: int, data: bytes) -> None:
+    path = _disk_tile_path(frame_id, z, x, y)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    except OSError as error:
+        logger.warning("tile disk cache write failed: %s", error)
+
+
+def _prune_disk_cache_if_needed(force: bool = False) -> None:
+    global _last_disk_prune_at
+    if DISK_CACHE_DIR is None or DISK_CACHE_MAX_AGE_SECONDS <= 0:
+        return
+    now = time.time()
+    with _last_disk_prune_lock:
+        if not force and now - _last_disk_prune_at < DISK_CACHE_PRUNE_INTERVAL_SECONDS:
+            return
+        _last_disk_prune_at = now
+
+    root = DISK_CACHE_DIR / "tiles"
+    if not root.exists():
+        return
+    cutoff = now - DISK_CACHE_MAX_AGE_SECONDS
+    removed = 0
+    for file_path in root.rglob("*.png"):
+        try:
+            if file_path.stat().st_mtime < cutoff:
+                file_path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    for dir_path in sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True):
+        try:
+            dir_path.rmdir()
+        except OSError:
+            continue
+    if removed:
+        _metric_increment("diskCachePrunedFiles", removed)
+
+
+def _tile_bytes(cache: RadarCache, frame: RadarFrame, z: int, x: int, y: int) -> Tuple[bytes, bool]:
+    key = (frame.frame_id, z, x, y)
+    with cache.tile_cache_lock:
+        data = cache.tile_cache.get(key)
+        if data is not None:
+            cache.tile_cache.pop(key, None)
+            cache.tile_cache[key] = data
     if data is None:
-        data = _render_tile(frame.image, z, x, y)
-        if len(cache.tile_cache) > 8000:
-            cache.tile_cache.clear()
+        data = _read_disk_tile(frame.frame_id, z, x, y)
+        if data is not None:
+            _metric_increment("tileDiskHits")
+    else:
+        _metric_increment("tileMemoryHits")
+    if data is None:
+        try:
+            if frame.layer_name:
+                data = _render_wms_tile(frame, z, x, y)
+            elif DWD_RADAR_RENDER_MODE == "wms":
+                data = _render_wms_tile(frame, z, x, y)
+            else:
+                data = _render_tile(frame.image, z, x, y)
+        except Exception as error:
+            _metric_increment("tileErrors")
+            logger.error("tile render failed frame=%s z=%s x=%s y=%s: %s", frame.frame_id, z, x, y, error)
+            data = _empty_tile()
+        with cache.tile_cache_lock:
+            while len(cache.tile_cache) > 12000:
+                cache.tile_cache.pop(next(iter(cache.tile_cache)))
+            cache.tile_cache[key] = data
+        _write_disk_tile(frame.frame_id, z, x, y, data)
+        _metric_increment("tileRendered")
+        return data, True
+
+    with cache.tile_cache_lock:
+        cache.tile_cache.pop(key, None)
         cache.tile_cache[key] = data
-    return Response(content=data, media_type="image/png", headers={"Cache-Control": "public, max-age=240"})
+    return data, False
 
 
 def _ensure_cache() -> RadarCache:
-    global _cache
+    global _cache, _refreshing
     now = time.time()
-    if _cache is None or now - _cache.loaded_at > CACHE_SECONDS:
-        _cache = RadarCache(loaded_at=now, frames=_download_frames(), tile_cache={})
-    return _cache
+    with _cache_lock:
+        cache = _cache
+        if cache is not None and now - cache.loaded_at <= CACHE_SECONDS:
+            return cache
+        if cache is not None:
+            _schedule_refresh()
+            return cache
+
+    with _cache_build_lock:
+        with _cache_lock:
+            cache = _cache
+            if cache is not None:
+                return cache
+        cache = _refresh_cache_blocking(include_history=False)
+    if BACKGROUND_HISTORY:
+        _schedule_refresh(include_history=True)
+    return cache
 
 
-def _download_frames() -> List[RadarFrame]:
+def _start_refresh_loop() -> None:
+    global _refresh_loop_started
+    with _cache_lock:
+        if _refresh_loop_started:
+            return
+        _refresh_loop_started = True
+    threading.Thread(target=_refresh_loop, daemon=True).start()
+
+
+def _refresh_loop() -> None:
+    if STARTUP_WARM:
+        _schedule_refresh()
+    while True:
+        time.sleep(max(60, REFRESH_INTERVAL_SECONDS))
+        _schedule_refresh()
+
+
+def _schedule_refresh(include_history: bool | None = None) -> bool:
+    global _refreshing
+    with _cache_lock:
+        if _refreshing:
+            return False
+        _refreshing = True
+    threading.Thread(
+        target=_refresh_cache_background,
+        args=(BACKGROUND_HISTORY if include_history is None else include_history,),
+        daemon=True
+    ).start()
+    return True
+
+
+def _refresh_cache_blocking(include_history: bool) -> RadarCache:
+    global _cache
+    started = time.time()
+    _metric_set("lastRefreshStartedAt", datetime.now(timezone.utc).isoformat())
+    fresh = _build_cache(include_history=include_history)
+    with _cache_lock:
+        _cache = fresh
+        cache = _cache
+    _metric_increment("refreshCount")
+    _metric_set("lastRefreshError", None)
+    _metric_set("lastRefreshFinishedAt", datetime.now(timezone.utc).isoformat())
+    _metric_set("lastRefreshDurationSeconds", round(time.time() - started, 3))
+    _schedule_tile_warm(cache)
+    threading.Thread(target=_prune_disk_cache_if_needed, daemon=True).start()
+    return cache
+
+
+def _refresh_cache_background(include_history: bool = False) -> None:
+    global _cache, _refreshing
+    started = time.time()
+    _metric_set("lastRefreshStartedAt", datetime.now(timezone.utc).isoformat())
+    try:
+        fresh = _build_cache(include_history=include_history)
+        with _cache_lock:
+            _cache = fresh
+        _schedule_tile_warm(fresh)
+        threading.Thread(target=_prune_disk_cache_if_needed, daemon=True).start()
+        _metric_increment("refreshCount")
+        _metric_set("lastRefreshError", None)
+    except Exception as error:
+        _metric_increment("refreshErrors")
+        _metric_set("lastRefreshError", str(error))
+        logger.error("background refresh failed: %s", error)
+    finally:
+        _metric_set("lastRefreshFinishedAt", datetime.now(timezone.utc).isoformat())
+        _metric_set("lastRefreshDurationSeconds", round(time.time() - started, 3))
+        with _cache_lock:
+            _refreshing = False
+
+
+def _build_cache(include_history: bool) -> RadarCache:
+    return RadarCache(loaded_at=time.time(), frames=_download_frames(include_history=include_history), tile_cache={})
+
+
+def _schedule_tile_warm(cache: RadarCache, force: bool = False) -> bool:
+    global _warming, _warmed_cache_id
+    if not WARM_TILES or not cache.frames:
+        return False
+    with _warm_lock:
+        if _warming or (not force and _warmed_cache_id == cache.loaded_at):
+            return False
+        _warming = True
+        _warmed_cache_id = cache.loaded_at
+    threading.Thread(target=_warm_tiles_background, args=(cache, cache.loaded_at), daemon=True).start()
+    return True
+
+
+def _warm_tiles_background(cache: RadarCache, cache_id: float) -> None:
+    global _warming, _warm_stats
+    started = datetime.now(timezone.utc).isoformat()
+    rendered = 0
+    reused = 0
+    warmed_frames = 0
+    _warm_stats = {
+        "lastStartedAt": started,
+        "lastFinishedAt": None,
+        "lastCacheId": cache_id,
+        "rendered": 0,
+        "reused": 0,
+        "frames": 0,
+    }
+
+    try:
+        for frame_index, frame in enumerate(cache.frames[:max(1, WARM_FRAME_LIMIT)]):
+            zooms = list(WARM_ZOOMS)
+            if frame_index < WARM_DETAIL_FRAME_LIMIT:
+                zooms.extend(WARM_DETAIL_ZOOMS)
+            for z in dict.fromkeys(zooms):
+                for x, y in _combined_warm_tile_paths(z):
+                    _, did_render = _tile_bytes(cache, frame, z, x, y)
+                    if did_render:
+                        rendered += 1
+                    else:
+                        reused += 1
+            warmed_frames += 1
+    except Exception as error:
+        logger.error("tile warm failed: %s", error)
+    finally:
+        finished = datetime.now(timezone.utc).isoformat()
+        _warm_stats = {
+            "lastStartedAt": started,
+            "lastFinishedAt": finished,
+            "lastCacheId": cache_id,
+            "rendered": rendered,
+            "reused": reused,
+            "frames": warmed_frames,
+        }
+        with _warm_lock:
+            _warming = False
+        threading.Thread(target=_prune_disk_cache_if_needed, daemon=True).start()
+
+
+def _combined_warm_tile_paths(z: int) -> List[Tuple[int, int]]:
+    paths = _warm_tile_paths(z)
+    if HOTSPOT_WARM and z in HOTSPOT_ZOOMS:
+        paths.extend(_hotspot_tile_paths(z))
+        with _dynamic_hotspots_lock:
+            hotspots = list(_dynamic_hotspots)
+        for lat, lon in hotspots:
+            paths.extend(_hotspot_tile_paths(z, lat=lat, lon=lon, radius=HOTSPOT_RADIUS_TILES))
+    return list(dict.fromkeys(paths))
+
+
+def _warm_tile_paths(z: int) -> List[Tuple[int, int]]:
+    west, south, east, north = _intersection(WARM_BBOX, RADAR_BBOX) or WARM_BBOX
+    min_x, min_y = _lon_lat_to_tile(west, north, z)
+    max_x, max_y = _lon_lat_to_tile(east, south, z)
+    return [
+        (x, y)
+        for x in range(min(min_x, max_x), max(min_x, max_x) + 1)
+        for y in range(min(min_y, max_y), max(min_y, max_y) + 1)
+    ]
+
+
+def _hotspot_tile_paths(z: int, lat: float = HOTSPOT_LAT, lon: float = HOTSPOT_LON, radius: int = HOTSPOT_RADIUS_TILES) -> List[Tuple[int, int]]:
+    center_x, center_y = _lon_lat_to_tile(lon, lat, z)
+    tile_count = 2**z
+    radius = max(0, radius)
+    return [
+        (x, y)
+        for x in range(max(0, center_x - radius), min(tile_count - 1, center_x + radius) + 1)
+        for y in range(max(0, center_y - radius), min(tile_count - 1, center_y + radius) + 1)
+    ]
+
+
+def _lon_lat_to_tile(lon: float, lat: float, z: int) -> Tuple[int, int]:
+    tile_count = 2**z
+    clamped_lat = max(-85.05112878, min(85.05112878, lat))
+    lat_rad = math.radians(clamped_lat)
+    x = int(math.floor((lon + 180.0) / 360.0 * tile_count))
+    y = int(math.floor((1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * tile_count))
+    return (
+        min(max(x, 0), tile_count - 1),
+        min(max(y, 0), tile_count - 1),
+    )
+
+
+def _download_frames(include_history: bool) -> List[RadarFrame]:
+    if DWD_RADAR_RENDER_MODE == "wms":
+        return _download_wms_frames(include_history=include_history)
+
     latest = _download_archive(DWD_RV_URL)
     latest_frames = _extract_frames(latest)
+    if DWD_RADAR_RENDER_MODE in {"native", "hybrid", "raw"}:
+        latest_frames = [frame for frame in latest_frames if _is_native_timeline_frame(frame)]
     latest_base = latest_frames[0].time if latest_frames else datetime.now(timezone.utc)
 
     observed_by_time: Dict[datetime, RadarFrame] = {}
-    for url in _recent_archive_urls(latest_base):
-        try:
-            frames = _extract_frames(_download_archive(url))
-        except Exception as error:
-            print(f"[DWD] skipping {url}: {error}")
-            continue
-        for frame in frames:
-            if not frame.is_forecast and frame.time >= latest_base - timedelta(hours=PAST_HOURS):
-                observed_by_time[frame.time] = frame
+    if include_history:
+        for url in _recent_archive_urls(latest_base):
+            try:
+                frames = _extract_frames(_download_archive(url))
+            except Exception as error:
+                logger.warning("skipping %s: %s", url, error)
+                continue
+            for frame in frames:
+                if (
+                    _is_native_timeline_frame(frame)
+                    and not frame.is_forecast
+                    and frame.time >= latest_base - timedelta(hours=PAST_HOURS)
+                ):
+                    observed_by_time[frame.time] = frame
 
     for frame in latest_frames:
         if not frame.is_forecast:
@@ -134,9 +711,444 @@ def _download_frames() -> List[RadarFrame]:
 
     combined = sorted(observed_by_time.values(), key=lambda item: item.time)
     combined.extend(frame for frame in latest_frames if frame.is_forecast)
+    combined = _dedupe_and_sort_frames(combined)
+
+    if DWD_RADAR_RENDER_MODE in {"native", "hybrid", "raw"}:
+        try:
+            blank = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+            after = max((frame.time for frame in combined), default=latest_base)
+            icon_raw = _download_icon_raw_frames(after=after)
+            if icon_raw:
+                combined.extend(icon_raw)
+                wms_after = max((frame.time for frame in icon_raw), default=after)
+                combined.extend(
+                    _download_icon_wms_frames(
+                        _download_wms_capabilities(),
+                        after=wms_after,
+                        blank=blank,
+                        until=after + timedelta(hours=ICON_FORECAST_HOURS),
+                    )
+                )
+            else:
+                combined.extend(_download_icon_wms_frames(_download_wms_capabilities(), after=after, blank=blank))
+            combined = _dedupe_and_sort_frames(combined)
+        except Exception as error:
+            logger.warning("ICON extension unavailable: %s", error)
+
     if not combined:
         raise RuntimeError("DWD radar archive contained no usable frames")
     return combined
+
+
+def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
+    if ICON_RAW_MODE not in {"auto", "raw", "raw-grib", "grib"}:
+        return []
+    if not _icon_raw_decoder_available():
+        _metric_increment("iconRawFailures")
+        _metric_set("lastIconRawError", "ecCodes decoder unavailable")
+        return []
+
+    try:
+        index = _latest_icon_raw_index("tot_prec")
+        if index is None:
+            raise RuntimeError("no ICON-EU TOT_PREC run found")
+        run_hour, reference_time, total_files = index
+
+        with _icon_raw_cache_lock:
+            cached_reference = _icon_raw_cache.get("referenceTime")
+            cached_frames = list(_icon_raw_cache.get("frames") or [])
+            if cached_reference == reference_time and cached_frames:
+                frames = [frame for frame in cached_frames if frame.time > after]
+                _metric_increment("iconRawCacheHits")
+                _metric_set("lastIconRawRun", f"{run_hour}/{reference_time.isoformat()}")
+                _metric_set("lastIconRawError", None)
+                _metric_set("iconRawFrames", len(frames))
+                return frames
+
+        snow_gsp = _icon_raw_index_for_run("snow_gsp", run_hour)
+        snow_con = _icon_raw_index_for_run("snow_con", run_hour)
+        cache: Dict[str, np.ndarray] = {}
+
+        frames: List[RadarFrame] = []
+        max_step = min(ICON_RAW_FORECAST_HOURS, max(total_files.keys(), default=0))
+        step_delta = max(1, ICON_RAW_STEP_HOURS)
+        start_step = 1
+        for step in range(start_step, max_step + 1, step_delta):
+            if len(frames) >= ICON_RAW_MAX_FRAMES:
+                break
+            if step not in total_files or step - 1 not in total_files:
+                continue
+            total_now = _icon_raw_values(total_files[step], cache)
+            total_prev = _icon_raw_values(total_files[step - 1], cache)
+            intensity = np.maximum(total_now - total_prev, 0.0)
+
+            snow_intensity = np.zeros_like(intensity)
+            for snow_index in (snow_gsp, snow_con):
+                if step in snow_index and step - 1 in snow_index:
+                    snow_intensity += np.maximum(
+                        _icon_raw_values(snow_index[step], cache) - _icon_raw_values(snow_index[step - 1], cache),
+                        0.0,
+                    )
+
+            precipitation_type = _precipitation_type(intensity, snow_intensity)
+            frame_time = reference_time + timedelta(hours=step)
+            frames.append(
+                RadarFrame(
+                    frame_id=f"iconraw--{reference_time.strftime('%Y%m%dT%H%M%SZ')}--{step:03d}",
+                    time=frame_time,
+                    is_forecast=True,
+                    image=_render_icon_raw_image(intensity, snow_intensity),
+                    reference_time=reference_time,
+                    precipitation_type=precipitation_type,
+                )
+            )
+
+        with _icon_raw_cache_lock:
+            _icon_raw_cache["referenceTime"] = reference_time
+            _icon_raw_cache["runHour"] = run_hour
+            _icon_raw_cache["frames"] = frames
+        filtered_frames = [frame for frame in frames if frame.time > after]
+        _metric_set("lastIconRawRun", f"{run_hour}/{reference_time.isoformat()}")
+        _metric_set("lastIconRawError", None)
+        _metric_set("iconRawFrames", len(filtered_frames))
+        return filtered_frames
+    except Exception as error:
+        _metric_increment("iconRawFailures")
+        _metric_set("lastIconRawError", str(error))
+        logger.warning("ICON raw unavailable: %s", error)
+        return []
+
+
+def _precipitation_type(intensity: np.ndarray, snow_intensity: np.ndarray) -> str:
+    wet = intensity >= 0.05
+    if not np.any(wet):
+        return "unknown"
+    snowy = wet & (snow_intensity >= 0.05)
+    snow_fraction = float(np.count_nonzero(snowy)) / float(np.count_nonzero(wet))
+    if snow_fraction >= 0.60:
+        return "snow"
+    if snow_fraction >= 0.20:
+        return "mixed"
+    return "rain"
+
+
+def _latest_icon_raw_index(variable: str) -> Tuple[str, datetime, Dict[int, str]] | None:
+    candidates: List[Tuple[datetime, str, Dict[int, str]]] = []
+    diagnostics: List[Dict[str, Any]] = []
+    for run_hour in ["00", "03", "06", "09", "12", "15", "18", "21"]:
+        files = _icon_raw_index_for_run(variable, run_hour)
+        diagnostic: Dict[str, Any] = {
+            "runHour": run_hour,
+            "steps": len(files),
+            "maxStep": max(files.keys(), default=0),
+        }
+        if not files:
+            diagnostics.append(diagnostic)
+            continue
+        reference = _icon_reference_from_url(next(iter(files.values())))
+        diagnostic["referenceTime"] = reference.isoformat() if reference else None
+        diagnostics.append(diagnostic)
+        if reference is not None:
+            candidates.append((reference, run_hour, files))
+    _metric_set("lastIconRawCandidates", diagnostics)
+    if not candidates:
+        return None
+    reference, run_hour, files = max(candidates, key=lambda item: (item[0], len(item[2])))
+    return run_hour, reference, files
+
+
+def _icon_raw_index_for_run(variable: str, run_hour: str) -> Dict[int, str]:
+    directory = f"{ICON_RAW_BASE_URL.rstrip('/')}/{run_hour}/{variable}/"
+    try:
+        with urllib.request.urlopen(directory, timeout=18) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return {}
+    suffix = variable.upper()
+    result: Dict[int, str] = {}
+    parser = _IconRawLinkParser()
+    parser.feed(html)
+    for href in parser.links:
+        if not href.endswith(f"_{suffix}.grib2.bz2"):
+            continue
+        parts = href.split("_")
+        if len(parts) < 6:
+            continue
+        try:
+            step = int(parts[5])
+        except ValueError:
+            continue
+        result[step] = urllib.parse.urljoin(directory, href)
+    return result
+
+
+def _icon_reference_from_url(url: str) -> datetime | None:
+    name = url.rsplit("/", 1)[-1]
+    parts = name.split("_")
+    if len(parts) < 5:
+        return None
+    try:
+        return datetime.strptime(parts[4], "%Y%m%d%H").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _icon_raw_values(url: str, cache: Dict[str, np.ndarray]) -> np.ndarray:
+    if url in cache:
+        return cache[url]
+    from eccodes import codes_get, codes_get_array, codes_grib_new_from_file, codes_release  # type: ignore
+
+    with urllib.request.urlopen(url, timeout=25) as response:
+        compressed = response.read()
+    raw = bz2.decompress(compressed)
+    with tempfile.NamedTemporaryFile(suffix=".grib2") as handle:
+        handle.write(raw)
+        handle.flush()
+        with open(handle.name, "rb") as grib_file:
+            gid = codes_grib_new_from_file(grib_file)
+            if gid is None:
+                raise RuntimeError(f"cannot decode GRIB: {url}")
+            try:
+                ni = int(codes_get(gid, "Ni"))
+                nj = int(codes_get(gid, "Nj"))
+                values = np.asarray(codes_get_array(gid, "values"), dtype=np.float32).reshape((nj, ni))
+                first_lat = float(codes_get(gid, "latitudeOfFirstGridPointInDegrees"))
+                last_lat = float(codes_get(gid, "latitudeOfLastGridPointInDegrees"))
+                first_lon = float(codes_get(gid, "longitudeOfFirstGridPointInDegrees"))
+                last_lon = float(codes_get(gid, "longitudeOfLastGridPointInDegrees"))
+            finally:
+                codes_release(gid)
+
+    cache[url] = _crop_regular_lat_lon(values, first_lat, last_lat, first_lon, last_lon)
+    return cache[url]
+
+
+def _crop_regular_lat_lon(values: np.ndarray, first_lat: float, last_lat: float, first_lon: float, last_lon: float) -> np.ndarray:
+    lats = np.linspace(first_lat, last_lat, values.shape[0], dtype=np.float32)
+    if first_lon > last_lon:
+        span = (last_lon + 360.0) - first_lon
+        lons = (first_lon + np.linspace(0.0, span, values.shape[1], dtype=np.float32)) % 360.0
+    else:
+        lons = np.linspace(first_lon, last_lon, values.shape[1], dtype=np.float32)
+    lons = ((lons + 180.0) % 360.0) - 180.0
+    lon_order = np.argsort(lons)
+    lat_order = np.argsort(lats)[::-1]
+    lons = lons[lon_order]
+    lats = lats[lat_order]
+    ordered_values = values[np.ix_(lat_order, lon_order)]
+    west, south, east, north = RADAR_BBOX
+    lon_mask = (lons >= west) & (lons <= east)
+    lat_mask = (lats >= south) & (lats <= north)
+    if not np.any(lon_mask) or not np.any(lat_mask):
+        raise RuntimeError("ICON grid does not intersect radar bbox")
+    cropped = ordered_values[np.ix_(lat_mask, lon_mask)]
+    return np.nan_to_num(cropped, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _render_icon_raw_image(intensity: np.ndarray, snow_intensity: np.ndarray) -> Image.Image:
+    rain = np.maximum(intensity - snow_intensity, 0.0)
+    rgba = np.zeros((intensity.shape[0], intensity.shape[1], 4), dtype=np.uint8)
+    for lower, upper, color in RAIN_COLOR_STEPS:
+        _paint_range(rgba, rain, lower, upper, color)
+    _paint_range(rgba, snow_intensity, 0.01, 0.5, (255, 255, 255, 145))
+    _paint_range(rgba, snow_intensity, 0.5, 2.0, (220, 238, 255, 180))
+    _paint_range(rgba, snow_intensity, 2.0, 9999.0, (186, 206, 255, 220))
+    image = Image.fromarray(rgba, "RGBA")
+    return image.resize((GRID_WIDTH, GRID_HEIGHT), Image.Resampling.BILINEAR)
+
+
+def _download_wms_frames(include_history: bool) -> List[RadarFrame]:
+    capabilities = _download_wms_capabilities()
+    start, end, step = _wms_time_range(capabilities, DWD_WMS_LAYER)
+    reference = _wms_reference_time(capabilities, DWD_WMS_LAYER) or min(datetime.now(timezone.utc), end)
+    reference = _snap_to_range(reference, start, end, step)
+
+    if include_history or PAST_HOURS > 0:
+        lower = max(start, reference - timedelta(hours=PAST_HOURS))
+    else:
+        lower = reference
+
+    frames: List[RadarFrame] = []
+    current = _snap_to_range(lower, start, end, step)
+    blank = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    while current <= end:
+        if current >= lower:
+            frame_id = _wms_frame_id(DWD_WMS_LAYER, current)
+            frames.append(
+                RadarFrame(
+                    frame_id=frame_id,
+                    time=current,
+                    is_forecast=current > reference,
+                    image=blank,
+                    layer_name=DWD_WMS_LAYER,
+                )
+            )
+        current += step
+
+    frames.extend(_download_icon_wms_frames(capabilities, after=end, blank=blank))
+
+    if not frames:
+        raise RuntimeError("DWD WMS capabilities contained no usable radar times")
+    return _dedupe_and_sort_frames(frames)
+
+
+def _download_icon_wms_frames(root: ET.Element, after: datetime, blank: Image.Image, until: datetime | None = None) -> List[RadarFrame]:
+    layer_name = _best_icon_layer(root)
+    if not layer_name:
+        return []
+    try:
+        start, end, step = _wms_time_range(root, layer_name)
+    except Exception as error:
+        logger.warning("ICON timeline unavailable for %s: %s", layer_name, error)
+        return []
+    reference_time = _wms_reference_time(root, layer_name)
+
+    lower = max(start, after + timedelta(minutes=30))
+    upper = min(end, until or (after + timedelta(hours=ICON_FORECAST_HOURS)))
+    if lower > upper:
+        return []
+
+    frames: List[RadarFrame] = []
+    current = _snap_to_range(lower, start, end, step)
+    while current <= upper:
+        if current >= lower:
+            frames.append(
+                RadarFrame(
+                    frame_id=_wms_frame_id(layer_name, current, reference_time),
+                    time=current,
+                    is_forecast=True,
+                    image=blank,
+                    layer_name=layer_name,
+                    reference_time=reference_time,
+                )
+            )
+        current += step
+    _metric_set("iconWmsFrames", len(frames))
+    return frames
+
+
+def _dedupe_and_sort_frames(frames: List[RadarFrame]) -> List[RadarFrame]:
+    seen: set[Tuple[str, datetime]] = set()
+    seen_times: set[datetime] = set()
+    result: List[RadarFrame] = []
+    for frame in sorted(frames, key=lambda item: (item.time, item.is_forecast, item.layer_name or "")):
+        key = (_frame_source(frame), frame.time)
+        if key in seen:
+            continue
+        if frame.frame_id.startswith("iconraw--") and frame.time in seen_times:
+            continue
+        seen.add(key)
+        seen_times.add(frame.time)
+        result.append(frame)
+    return result
+
+
+def _download_wms_capabilities() -> ET.Element:
+    params = {
+        "SERVICE": "WMS",
+        "VERSION": "1.3.0",
+        "REQUEST": "GetCapabilities",
+    }
+    url = f"{DWD_WMS_URL}?{urllib.parse.urlencode(params)}"
+    with urllib.request.urlopen(url, timeout=25) as response:
+        return ET.fromstring(response.read())
+
+
+def _wms_layer(root: ET.Element, layer_name: str) -> ET.Element:
+    for layer in root.iter():
+        if _xml_local_name(layer.tag) != "Layer":
+            continue
+        for child in layer:
+            if _xml_local_name(child.tag) == "Name" and (child.text or "").strip() == layer_name:
+                return layer
+    raise RuntimeError(f"DWD WMS layer not found: {layer_name}")
+
+
+def _best_icon_layer(root: ET.Element) -> str | None:
+    available: set[str] = set()
+    for layer in root.iter():
+        if _xml_local_name(layer.tag) != "Layer":
+            continue
+        for child in layer:
+            if _xml_local_name(child.tag) == "Name" and child.text:
+                available.add(child.text.strip())
+    for layer_name in ICON_PRECIP_LAYERS:
+        if layer_name in available:
+            return layer_name
+    return None
+
+
+def _wms_time_range(root: ET.Element, layer_name: str) -> Tuple[datetime, datetime, timedelta]:
+    layer = _wms_layer(root, layer_name)
+    for child in layer:
+        if _xml_local_name(child.tag) == "Dimension" and child.attrib.get("name") == "time":
+            value = (child.text or "").strip()
+            parts = value.split("/")
+            if len(parts) == 3:
+                start = _parse_wms_datetime(parts[0])
+                end = _parse_wms_datetime(parts[1])
+                step = _parse_wms_duration(parts[2])
+                return start, end, step
+            times = [_parse_wms_datetime(item.strip()) for item in value.split(",") if item.strip()]
+            if times:
+                step = times[1] - times[0] if len(times) > 1 else timedelta(minutes=5)
+                return min(times), max(times), step
+    raise RuntimeError(f"DWD WMS layer has no time dimension: {layer_name}")
+
+
+def _wms_reference_time(root: ET.Element, layer_name: str) -> datetime | None:
+    layer = _wms_layer(root, layer_name)
+    for child in layer:
+        if _xml_local_name(child.tag) == "Dimension" and child.attrib.get("name") == "REFERENCE_TIME":
+            default = child.attrib.get("default")
+            if default:
+                return _parse_wms_datetime(default)
+    return None
+
+
+def _parse_wms_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _parse_wms_duration(value: str) -> timedelta:
+    if value == "PT5M":
+        return timedelta(minutes=5)
+    if value.startswith("PT") and value.endswith("M"):
+        return timedelta(minutes=int(value[2:-1]))
+    if value.startswith("PT") and value.endswith("H"):
+        return timedelta(hours=int(value[2:-1]))
+    raise RuntimeError(f"Unsupported WMS time step: {value}")
+
+
+def _snap_to_range(value: datetime, start: datetime, end: datetime, step: timedelta) -> datetime:
+    if value <= start:
+        return start
+    if value >= end:
+        return end
+    step_seconds = max(1, int(step.total_seconds()))
+    offset = int((value - start).total_seconds()) // step_seconds * step_seconds
+    return start + timedelta(seconds=offset)
+
+
+def _wms_frame_id(layer_name: str, value: datetime, reference_time: datetime | None = None) -> str:
+    layer_token = urllib.parse.quote(layer_name, safe="")
+    value_token = value.strftime("%Y%m%dT%H%M%SZ")
+    if reference_time is None:
+        return f"wms--{layer_token}--{value_token}"
+    return f"wms--{layer_token}--{value_token}--ref{reference_time.strftime('%Y%m%dT%H%M%SZ')}"
+
+
+def _wms_layer_and_time_from_frame(frame: RadarFrame) -> Tuple[str, datetime]:
+    if frame.layer_name:
+        return frame.layer_name, frame.time
+    parts = frame.frame_id.split("--", 2)
+    if len(parts) == 3 and parts[0] == "wms":
+        return urllib.parse.unquote(parts[1]), datetime.strptime(parts[2], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    return DWD_WMS_LAYER, frame.time
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _download_archive(url: str) -> bytes:
@@ -166,7 +1178,7 @@ def _recent_archive_urls(reference: datetime) -> List[str]:
         with urllib.request.urlopen(DWD_RV_INDEX_URL, timeout=15) as response:
             html = response.read().decode("utf-8", errors="ignore")
     except Exception as error:
-        print(f"[DWD] index unavailable, using latest only: {error}")
+        logger.warning("index unavailable, using latest only: %s", error)
         return [DWD_RV_URL]
 
     parser = _DwdArchiveLinkParser()
@@ -214,6 +1226,19 @@ class _DwdArchiveLinkParser(HTMLParser):
                 self.links.append(value)
 
 
+class _IconRawLinkParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        if tag != "a":
+            return
+        for key, value in attrs:
+            if key == "href" and value:
+                self.links.append(value)
+
+
 def _parse_frame(name: str, raw: bytes) -> RadarFrame | None:
     try:
         header_end = raw.index(b"\x03") + 1
@@ -240,6 +1265,17 @@ def _time_from_name(name: str) -> Tuple[datetime, bool]:
     return base + timedelta(minutes=offset), offset > 0
 
 
+def _is_native_timeline_frame(frame: RadarFrame) -> bool:
+    if NATIVE_FRAME_STEP_MINUTES <= 5:
+        return True
+    parts = frame.frame_id.split("_")
+    try:
+        offset = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
+    except (IndexError, ValueError):
+        return True
+    return offset % NATIVE_FRAME_STEP_MINUTES == 0
+
+
 def _render_radar_image(grid: np.ndarray) -> Image.Image:
     raw_values = grid.astype(np.uint16)
     values = raw_values & np.uint16(0x0FFF)
@@ -252,11 +1288,8 @@ def _render_radar_image(grid: np.ndarray) -> Image.Image:
     intensity = np.zeros_like(values, dtype=np.float32)
     intensity[valid] = values[valid].astype(np.float32) / 10.0
 
-    _paint_range(rgba, intensity, 0.01, 0.4, (0, 210, 195, 140))
-    _paint_range(rgba, intensity, 0.4, 1.0, (20, 175, 80, 165))
-    _paint_range(rgba, intensity, 1.0, 2.5, (245, 220, 35, 185))
-    _paint_range(rgba, intensity, 2.5, 6.0, (255, 140, 25, 205))
-    _paint_range(rgba, intensity, 6.0, 9999.0, (225, 35, 30, 225))
+    for lower, upper, color in RAIN_COLOR_STEPS:
+        _paint_range(rgba, intensity, lower, upper, color)
 
     return Image.fromarray(rgba, "RGBA")
 
@@ -287,12 +1320,117 @@ def _render_tile(image: Image.Image, z: int, x: int, y: int) -> bytes:
 
     out = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
     crop = image.crop(source)
-    crop = crop.resize((max(1, target[2] - target[0]), max(1, target[3] - target[1])), Image.Resampling.BILINEAR)
+    crop = crop.resize((max(1, target[2] - target[0]), max(1, target[3] - target[1])), Image.Resampling.NEAREST)
     out.alpha_composite(crop, dest=(target[0], target[1]))
 
     buffer = io.BytesIO()
-    out.save(buffer, format="PNG", optimize=True)
+    out.save(buffer, format="PNG", optimize=False, compress_level=1)
     return buffer.getvalue()
+
+
+def _render_wms_tile(frame: RadarFrame, z: int, x: int, y: int) -> bytes:
+    if not _tile_intersects_wms_coverage(z, x, y):
+        return _empty_tile()
+
+    layer_name, time_value = _wms_layer_and_time_from_frame(frame)
+    west, south, east, north = _tile_web_mercator_bounds(z, x, y)
+    params = {
+        "SERVICE": "WMS",
+        "VERSION": "1.3.0",
+        "REQUEST": "GetMap",
+        "LAYERS": layer_name,
+        "STYLES": "",
+        "FORMAT": "image/png",
+        "TRANSPARENT": "true",
+        "CRS": "EPSG:3857",
+        "BBOX": f"{west:.6f},{south:.6f},{east:.6f},{north:.6f}",
+        "WIDTH": str(TILE_SIZE),
+        "HEIGHT": str(TILE_SIZE),
+        "TIME": time_value.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+    }
+    if frame.reference_time is not None:
+        params["DIM_REFERENCE_TIME"] = frame.reference_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    url = f"{DWD_WMS_URL}?{urllib.parse.urlencode(params)}"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "WeatherMat RadarProxy"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            data = response.read()
+            content_type = response.headers.get("Content-Type", "")
+            if response.status == 200 and ("image/png" in content_type or data.startswith(b"\x89PNG")):
+                if ICON_WMS_RECOLOR and layer_name != DWD_WMS_LAYER:
+                    return _recolor_precip_tile(data)
+                return data
+    except Exception as error:
+        _metric_increment("wmsTileFailures")
+        logger.warning("WMS tile failed z=%s x=%s y=%s: %s", z, x, y, error)
+    return _empty_tile()
+
+
+def _recolor_precip_tile(data: bytes) -> bytes:
+    try:
+        image = Image.open(io.BytesIO(data)).convert("RGBA")
+    except Exception:
+        return data
+
+    arr = np.array(image, dtype=np.uint8)
+    alpha = arr[:, :, 3].astype(np.uint8)
+    rgb = arr[:, :, :3].astype(np.float32)
+    visible = alpha > 8
+    if not np.any(visible):
+        return data
+
+    maxc = rgb.max(axis=2)
+    minc = rgb.min(axis=2)
+    chroma = maxc - minc
+    saturated = visible & (chroma > 18)
+    if not np.any(saturated):
+        return data
+
+    r = rgb[:, :, 0]
+    g = rgb[:, :, 1]
+    b = rgb[:, :, 2]
+    hue = np.zeros_like(maxc)
+
+    red_is_max = (maxc == r) & (chroma > 0)
+    green_is_max = (maxc == g) & (chroma > 0)
+    blue_is_max = (maxc == b) & (chroma > 0)
+    hue[red_is_max] = ((g[red_is_max] - b[red_is_max]) / chroma[red_is_max]) % 6.0
+    hue[green_is_max] = ((b[green_is_max] - r[green_is_max]) / chroma[green_is_max]) + 2.0
+    hue[blue_is_max] = ((r[blue_is_max] - g[blue_is_max]) / chroma[blue_is_max]) + 4.0
+    hue *= 60.0
+
+    out = np.zeros_like(arr)
+    light = saturated & (hue >= 165) & (hue < 250)
+    green = saturated & (hue >= 75) & (hue < 165)
+    yellow = saturated & (hue >= 45) & (hue < 75)
+    orange = saturated & (hue >= 18) & (hue < 45)
+    red = saturated & ((hue < 18) | (hue >= 300))
+    purple = saturated & (hue >= 250) & (hue < 300)
+
+    out[light] = RAIN_COLOR_STEPS[0][2]
+    out[green] = RAIN_COLOR_STEPS[1][2]
+    out[yellow] = RAIN_COLOR_STEPS[2][2]
+    out[orange] = RAIN_COLOR_STEPS[3][2]
+    out[red] = RAIN_COLOR_STEPS[4][2]
+    out[purple] = RAIN_COLOR_STEPS[5][2]
+
+    buffer = io.BytesIO()
+    Image.fromarray(out, "RGBA").save(buffer, format="PNG", optimize=False, compress_level=1)
+    return buffer.getvalue()
+
+
+def _tile_web_mercator_bounds(z: int, x: int, y: int) -> Tuple[float, float, float, float]:
+    tile_count = 2**z
+    tile_size = (WEB_MERCATOR_LIMIT * 2.0) / tile_count
+    west = -WEB_MERCATOR_LIMIT + x * tile_size
+    east = west + tile_size
+    north = WEB_MERCATOR_LIMIT - y * tile_size
+    south = north - tile_size
+    return west, south, east, north
+
+
+def _tile_intersects_wms_coverage(z: int, x: int, y: int) -> bool:
+    return _intersection(_tile_lon_lat_bounds(z, x, y), RADAR_BBOX) is not None
 
 
 def _source_rect(west: float, south: float, east: float, north: float) -> Tuple[int, int, int, int]:
@@ -338,6 +1476,6 @@ def _empty_tile() -> bytes:
     if _transparent_tile is None:
         image = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
         buffer = io.BytesIO()
-        image.save(buffer, format="PNG", optimize=True)
+        image.save(buffer, format="PNG", optimize=False, compress_level=1)
         _transparent_tile = buffer.getvalue()
     return _transparent_tile

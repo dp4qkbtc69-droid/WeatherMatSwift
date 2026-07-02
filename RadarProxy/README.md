@@ -135,11 +135,12 @@ Optional environment variables:
 - `DWD_RADAR_PAST_HOURS`, default `24`
 - `DWD_RADAR_PAST_STEP_MINUTES`, default `15`
 - `DWD_RADAR_CACHE_SECONDS`, default `240`
+- `RADAR_PROXY_TOKEN`, optional locally but strongly recommended for every
+  publicly reachable deployment
+- `RADAR_DISK_CACHE_DIR`, optional path for persistent rendered tile cache
 
 ## Server Choice
 
 The proxy can technically run anywhere with Python 3.12 and enough memory, but
-the clean production setup is a VPS/container host. A Synology NAS can be used
-only if it supports Container Manager or if Python services are maintained
-manually. For small ARM NAS models this is usually less robust than a tiny VPS,
-especially when the endpoint is public and needs reliable HTTPS.
+the clean production setup is a VPS/container host with the bundled Caddy
+setup for HTTPS (see "Server Deploy With HTTPS" above).

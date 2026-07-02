@@ -1,4 +1,7 @@
 WeatherMat/LocalConfig.plist
+RadarProxy/.env
+RadarProxy/.env.*
+!RadarProxy/.env.*.example
 .DS_Store
 *.xcuserstate
 xcuserdata/

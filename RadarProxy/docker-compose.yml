@@ -3,13 +3,41 @@ services:
     build: .
     restart: unless-stopped
     environment:
+      RADAR_PROXY_TOKEN: "${RADAR_PROXY_TOKEN:?Set RADAR_PROXY_TOKEN in .env}"
+      DWD_RADAR_RENDER_MODE: "${DWD_RADAR_RENDER_MODE:-native}"
+      DWD_RADAR_NATIVE_FRAME_STEP_MINUTES: "${DWD_RADAR_NATIVE_FRAME_STEP_MINUTES:-10}"
+      DWD_ICON_WMS_RECOLOR: "${DWD_ICON_WMS_RECOLOR:-true}"
+      DWD_ICON_RAW_MODE: "${DWD_ICON_RAW_MODE:-auto}"
+      DWD_ICON_RAW_FORECAST_HOURS: "${DWD_ICON_RAW_FORECAST_HOURS:-72}"
+      DWD_ICON_RAW_MAX_FRAMES: "${DWD_ICON_RAW_MAX_FRAMES:-72}"
+      DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS: "${DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS:-86400}"
+      DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS: "${DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS:-3600}"
+      DWD_WMS_LAYER: "${DWD_WMS_LAYER:-Radar_rv_product_1x1km_ger}"
+      DWD_RADAR_TILE_MAX_ZOOM: "${DWD_RADAR_TILE_MAX_ZOOM:-13}"
       DWD_RADAR_PAST_HOURS: "${DWD_RADAR_PAST_HOURS:-24}"
       DWD_RADAR_PAST_STEP_MINUTES: "${DWD_RADAR_PAST_STEP_MINUTES:-15}"
       DWD_RADAR_CACHE_SECONDS: "${DWD_RADAR_CACHE_SECONDS:-240}"
+      DWD_RADAR_REFRESH_INTERVAL_SECONDS: "${DWD_RADAR_REFRESH_INTERVAL_SECONDS:-300}"
+      DWD_RADAR_STARTUP_WARM: "${DWD_RADAR_STARTUP_WARM:-true}"
+      DWD_RADAR_WARM_TILES: "${DWD_RADAR_WARM_TILES:-true}"
+      DWD_RADAR_WARM_FRAME_LIMIT: "${DWD_RADAR_WARM_FRAME_LIMIT:-28}"
+      DWD_RADAR_WARM_DETAIL_FRAME_LIMIT: "${DWD_RADAR_WARM_DETAIL_FRAME_LIMIT:-10}"
+      DWD_RADAR_WARM_ZOOMS: "${DWD_RADAR_WARM_ZOOMS:-5,6}"
+      DWD_RADAR_WARM_DETAIL_ZOOMS: "${DWD_RADAR_WARM_DETAIL_ZOOMS:-7}"
+      DWD_RADAR_HOTSPOT_WARM: "${DWD_RADAR_HOTSPOT_WARM:-true}"
+      DWD_RADAR_HOTSPOT_LAT: "${DWD_RADAR_HOTSPOT_LAT:-50.088}"
+      DWD_RADAR_HOTSPOT_LON: "${DWD_RADAR_HOTSPOT_LON:-9.064}"
+      DWD_RADAR_HOTSPOT_RADIUS_TILES: "${DWD_RADAR_HOTSPOT_RADIUS_TILES:-1}"
+      DWD_RADAR_HOTSPOT_ZOOMS: "${DWD_RADAR_HOTSPOT_ZOOMS:-8,9,10,11,12}"
     expose:
       - "8787"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=20).read()"]
+      test: ["CMD-SHELL", "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health?token=' + os.environ['RADAR_PROXY_TOKEN'], timeout=20).read()\""]
       interval: 5m
       timeout: 30s
       retries: 2
@@ -25,6 +53,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

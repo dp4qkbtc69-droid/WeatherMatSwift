@@ -1,0 +1,23 @@
+name: Proxy tests
+
+on:
+  push:
+    paths:
+      - "RadarProxy/**"
+      - ".github/workflows/proxy-tests.yml"
+  pull_request:
+    paths:
+      - "RadarProxy/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install fastapi numpy pillow
+      - name: Run radar core tests
+        run: python RadarProxy/test_radar_core.py
