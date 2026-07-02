@@ -10,6 +10,7 @@ services:
       DWD_ICON_RAW_MODE: "${DWD_ICON_RAW_MODE:-auto}"
       DWD_ICON_RAW_FORECAST_HOURS: "${DWD_ICON_RAW_FORECAST_HOURS:-72}"
       DWD_ICON_RAW_MAX_FRAMES: "${DWD_ICON_RAW_MAX_FRAMES:-72}"
+      RADAR_DISK_CACHE_DIR: "/tiles"
       DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS: "${DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS:-86400}"
       DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS: "${DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS:-3600}"
       DWD_WMS_LAYER: "${DWD_WMS_LAYER:-Radar_rv_product_1x1km_ger}"
@@ -20,7 +21,9 @@ services:
       DWD_RADAR_REFRESH_INTERVAL_SECONDS: "${DWD_RADAR_REFRESH_INTERVAL_SECONDS:-300}"
       DWD_RADAR_STARTUP_WARM: "${DWD_RADAR_STARTUP_WARM:-true}"
       DWD_RADAR_WARM_TILES: "${DWD_RADAR_WARM_TILES:-true}"
-      DWD_RADAR_WARM_FRAME_LIMIT: "${DWD_RADAR_WARM_FRAME_LIMIT:-28}"
+      # Warm the overview zooms (5,6) for every frame so jumping to follow-up
+      # days shows tiles immediately; detail zoom (7) stays near-term only.
+      DWD_RADAR_WARM_FRAME_LIMIT: "${DWD_RADAR_WARM_FRAME_LIMIT:-96}"
       DWD_RADAR_WARM_DETAIL_FRAME_LIMIT: "${DWD_RADAR_WARM_DETAIL_FRAME_LIMIT:-10}"
       DWD_RADAR_WARM_ZOOMS: "${DWD_RADAR_WARM_ZOOMS:-5,6}"
       DWD_RADAR_WARM_DETAIL_ZOOMS: "${DWD_RADAR_WARM_DETAIL_ZOOMS:-7}"
@@ -39,6 +42,7 @@ services:
     volumes:
       - ./apns:/apns:ro
       - push_data:/data
+      - tile_cache:/tiles
     expose:
       - "8787"
     logging:
@@ -77,3 +81,4 @@ volumes:
   caddy_data:
   caddy_config:
   push_data:
+  tile_cache:

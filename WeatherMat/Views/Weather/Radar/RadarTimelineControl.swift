@@ -99,6 +99,10 @@ struct RadarTimelineControl: View {
                     HStack(spacing: 6) {
                         ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
                             Button {
+                                // Jumping to another day always stops playback so
+                                // the animation doesn't immediately run off the
+                                // freshly selected (and possibly unwarmed) frame.
+                                isPlaying = false
                                 withAnimation(.easeInOut(duration: 0.18)) {
                                     activeBucketIndex = index
                                 }

@@ -378,11 +378,19 @@ struct RadarV2TilePrefetchPlan {
     }
 
     func fetch() async {
-        guard let current = frameURLGroups.first else { return }
+        let groups = frameURLGroups
+        guard let current = groups.first else { return }
+        // Priority wave: current frame, then the two immediate forward frames,
+        // sequentially — these are what playback needs next, so they must not
+        // compete with the wider prefetch for bandwidth.
         await Self.fetchAndMark(current)
-        let neighbors = Array(frameURLGroups.dropFirst().prefix(10))
+        for frameGroup in groups.dropFirst().prefix(2) {
+            await Self.fetchAndMark(frameGroup)
+        }
+        // Remaining neighbors fill in parallel afterwards.
+        let rest = Array(groups.dropFirst(3).prefix(8))
         await withTaskGroup(of: Void.self) { group in
-            for frameGroup in neighbors {
+            for frameGroup in rest {
                 group.addTask {
                     await Self.fetchAndMark(frameGroup)
                 }

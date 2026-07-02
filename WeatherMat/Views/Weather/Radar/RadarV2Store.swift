@@ -152,7 +152,10 @@ final class RadarV2Store {
 
     private func prewarmFrames(around frame: RainRadarFrame) -> [RainRadarFrame] {
         guard let index = visibleFrames.firstIndex(of: frame) else { return [] }
-        return [-4, -3, -2, -1, 1, 2, 3, 4, 5, 6]
+        // Forward-biased order: the immediate next playback frames are prefetched
+        // first so playback never advances onto an unwarmed frame, then a few
+        // backward frames for scrubbing.
+        return [1, 2, 3, 4, 5, 6, -1, -2, -3, -4]
             .compactMap { offset -> RainRadarFrame? in
                 let nextIndex = index + offset
                 return visibleFrames.indices.contains(nextIndex) ? visibleFrames[nextIndex] : nil

@@ -156,7 +156,10 @@ struct RainRadarScreen: View {
                 try? await Task.sleep(nanoseconds: store.nextPlaybackDelayNanoseconds)
                 guard !Task.isCancelled else { return }
                 if let nextFrame = store.nextPlaybackFrame {
-                    await RadarTileReadinessCenter.shared.waitUntilReady(nextFrame.id, timeoutNanoseconds: 360_000_000)
+                    // Wait until the next frame's tiles are warmed. Returns
+                    // immediately once ready; the timeout only caps how long we
+                    // hold for slow follow-up-day frames before advancing.
+                    await RadarTileReadinessCenter.shared.waitUntilReady(nextFrame.id, timeoutNanoseconds: 1_200_000_000)
                 }
                 guard !Task.isCancelled else { return }
                 store.advance()
