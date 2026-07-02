@@ -1,6 +1,11 @@
 // RadarWidgets.swift
+// Instrument-mode chrome for the radar screen: thin dark glass, restrained
+// controls, accent as tint — deliberately quieter than the emotional
+// liquid-glass language of the main screens.
 import SwiftUI
 
+/// Rail button in instrument style: 44 pt target, active state via gold
+/// tint + ring instead of a filled surface.
 struct RadarRoundButton: View {
     let icon: String
     var selected = false
@@ -10,88 +15,105 @@ struct RadarRoundButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(.title2, weight: .bold))
-                .foregroundStyle(selected ? Color(hex: "#5f4500") : .white.opacity(0.90))
-                .frame(width: 52, height: 52)
-                .background(selected ? Color(hex: "#ffd166") : Color.black.opacity(0.10))
-                .background(.white.opacity(selected ? 0.0 : 0.13))
-                .background(.ultraThinMaterial.opacity(0.74))
+                .font(.system(.subheadline, weight: .semibold))
+                .foregroundStyle(selected ? AppColors.selection : .white.opacity(0.88))
+                .frame(width: 44, height: 44)
+                .background(Color.black.opacity(0.30))
+                .background(.ultraThinMaterial.opacity(0.7))
                 .clipShape(Circle())
-                .overlay(Circle().stroke(.white.opacity(selected ? 0.54 : 0.22), lineWidth: 1))
-                .shadow(color: .black.opacity(0.16), radius: 12, x: 0, y: 5)
+                .overlay(
+                    Circle().stroke(
+                        selected ? AppColors.selection.opacity(0.9) : .white.opacity(0.16),
+                        lineWidth: selected ? 1.5 : 1
+                    )
+                )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
+/// Compact legend panel — docks directly above the timeline instead of
+/// floating over the map.
 struct RadarLegendView: View {
     var attribution: String?
+    var isFallbackSource = false
     let close: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "drop.fill").font(.system(.caption, weight: .bold))
-                Text("Niederschlagsintensität")
-                    .font(.system(.caption, weight: .bold))
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Text("Niederschlag")
+                    .font(.system(.caption, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
                 Spacer(minLength: 8)
                 Button(action: close) {
                     Image(systemName: "xmark")
                         .font(.system(.caption2, weight: .bold))
-                        .frame(width: 24, height: 24)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Legende schließen")
             }
 
-            HStack(spacing: 0) {
-                ForEach(RadarLegendStep.steps) { step in
-                    step.color.frame(maxWidth: .infinity, minHeight: 9, maxHeight: 9)
-                }
-            }
-            .clipShape(Capsule())
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 7)], alignment: .leading, spacing: 6) {
-                ForEach(RadarLegendStep.steps) { step in
-                    HStack(spacing: 4) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(step.color)
-                            .frame(width: 8, height: 8)
-                        Text(step.label)
-                            .font(.system(.caption2, weight: .semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
+            if isFallbackSource {
+                // RainViewer fallback tiles use their own palette — showing
+                // our scale would be wrong, so we say so instead.
+                Text("Ersatzdaten aktiv – Farbskala weicht ab")
+                    .font(.system(.caption2, weight: .semibold))
+                    .foregroundStyle(AppColors.selection)
+            } else {
+                HStack(spacing: 1) {
+                    ForEach(RadarLegendStep.steps) { step in
+                        step.color.frame(maxWidth: .infinity, minHeight: 8, maxHeight: 8)
                     }
                 }
-            }
-            .foregroundStyle(.white.opacity(0.84))
+                .clipShape(Capsule())
 
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.white.opacity(0.92))
-                    .frame(width: 10, height: 10)
-                Text("Schnee: weiß/hellblau, wenn ICON-Rohdaten verfügbar sind")
-                    .font(.system(.caption2, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.80))
-                    .lineLimit(2)
+                HStack(spacing: 1) {
+                    ForEach(RadarLegendStep.steps) { step in
+                        Text(step.label)
+                            .font(.system(.caption2, weight: .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .foregroundStyle(.white.opacity(0.78))
+
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white.opacity(0.92))
+                        .frame(width: 8, height: 8)
+                    Text("Schnee weiß/hellblau")
+                        .font(.system(.caption2, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.78))
+                }
             }
 
-            if let attribution {
-                Text("Datenquelle: \(attribution)")
-                    .font(.system(.caption2, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(2)
-            }
+            Text(footerText)
+                .font(.system(.caption2, weight: .regular))
+                .foregroundStyle(.white.opacity(0.55))
+                .lineLimit(2)
         }
-        .foregroundStyle(.white)
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: 330)
-        .background(Color.black.opacity(0.26))
-        .background(.ultraThinMaterial.opacity(0.82))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.20), lineWidth: 1))
+        .padding(.vertical, 9)
+        .background(Color.black.opacity(0.45))
+        .background(.ultraThinMaterial.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignTokens.radiusSmall)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private var footerText: String {
+        if isFallbackSource {
+            return attribution ?? "RainViewer"
+        }
+        return "DWD-Radarkomposit · 1-km-Raster · Vorhersage: ICON-EU"
     }
 }
 

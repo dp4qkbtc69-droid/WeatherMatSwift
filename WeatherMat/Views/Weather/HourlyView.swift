@@ -1,7 +1,8 @@
 // HourlyView.swift
 import SwiftUI
 
-private let cellWidth: CGFloat = 90
+// Wide enough that "XX km/h" plus icon never touches the cell edges.
+private let cellWidth: CGFloat = 96
 
 struct HourlyView: View {
     let entries: [HourlyEntry]
@@ -146,6 +147,7 @@ struct HourlyCellView: View {
                            text: "\(entry.windSpeed) km/h",
                            color: windColor)
             }
+            .padding(.horizontal, 4)
         }
         .frame(width: cellWidth)
         .padding(.vertical, 8)

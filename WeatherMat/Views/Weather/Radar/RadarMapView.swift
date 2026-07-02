@@ -95,7 +95,10 @@ struct RadarV2MapView: UIViewRepresentable {
         let mapView = MKMapView()
         mapView.delegate = context.coordinator
         mapView.mapType = .mutedStandard
-        mapView.pointOfInterestFilter = .includingAll
+        // Instrument mode: dark base map so the light precipitation blues keep
+        // figure-ground contrast; POIs off — the radar is the content here.
+        mapView.overrideUserInterfaceStyle = .dark
+        mapView.pointOfInterestFilter = .excludingAll
         mapView.showsCompass = false
         mapView.showsScale = false
         mapView.setRegion(region, animated: false)

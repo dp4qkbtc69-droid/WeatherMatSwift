@@ -310,8 +310,8 @@ struct SettingsSectionView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .background(.white.opacity(0.07))
             .background(.ultraThinMaterial.opacity(0.3))
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -428,8 +428,8 @@ struct DataSourceStatusView: View {
                 )
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(.white.opacity(0.07))
         .background(.ultraThinMaterial.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -460,8 +460,8 @@ struct StatusPill: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(.white.opacity(0.08))
+        .padding(.vertical, 8)
+        .background(.white.opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
@@ -502,7 +502,7 @@ struct SettingsActionRow: View {
                     .foregroundStyle(.white.opacity(0.36))
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
     }

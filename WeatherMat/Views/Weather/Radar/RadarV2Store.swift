@@ -49,17 +49,14 @@ final class RadarV2Store {
         return selectedFrame.time.formatted(.dateTime.weekday(.abbreviated).day().month(.wide).hour().minute().locale(.init(identifier: "de_DE")))
     }
 
+    // User-facing wording: "Radar" (observation) vs. "Vorhersage" (forecast).
+    // Model names (ICON-EU, DWD RV) stay in the legend as provenance only.
     var selectedFrameKindLabel: String {
         guard let selectedFrame else { return "Radar" }
         if selectedFrame.precipitationType == .snow {
             return "Schnee"
         }
-        switch selectedFrame.sourceKind {
-        case .iconEuRaw, .iconEu:
-            return "ICON-EU"
-        case .dwdRadar, .rainViewer, .unknown:
-            return selectedFrame.isForecast ? "Prognose" : "Radar"
-        }
+        return selectedFrame.isForecast ? "Vorhersage" : "Radar"
     }
 
     var isAtEnd: Bool {

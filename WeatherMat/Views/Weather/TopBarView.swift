@@ -66,6 +66,7 @@ struct TopBarView: View {
                         )
                         .frame(maxWidth: 214, alignment: .trailing)
 
+                        // Secondary action: quiet ghost pill.
                         Button {
                             HapticService.impact(.light)
                             withAnimation(.easeInOut(duration: 0.18)) {
@@ -73,27 +74,28 @@ struct TopBarView: View {
                             }
                         } label: {
                             Label("Wetter melden", systemImage: "cloud.rain.fill")
-                                .font(.system(.footnote, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(.white.opacity(0.16))
-                                .background(.ultraThinMaterial.opacity(0.62))
+                                .font(.system(.caption, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 6)
+                                .background(.white.opacity(0.10))
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
 
+                        // Primary navigation: the strongest element in the cluster.
                         Button {
                             HapticService.impact(.light)
                             openRainRadar()
                         } label: {
                             Image(systemName: "map.fill")
                                 .font(.system(.body, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.94))
-                                .frame(width: 38, height: 38)
-                                .background(.white.opacity(0.16))
-                                .background(.ultraThinMaterial.opacity(0.62))
+                                .foregroundStyle(.white)
+                                .frame(width: 42, height: 42)
+                                .background(.white.opacity(0.18))
+                                .background(.ultraThinMaterial.opacity(0.7))
                                 .clipShape(Circle())
+                                .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Regenradar öffnen")
@@ -236,7 +238,9 @@ struct ModelStatusButton: View {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 7) {
+                // Information, not a control: plain text with a subtle shadow —
+                // the pill weight is reserved for actions.
+                HStack(spacing: 6) {
                     TrafficLightView(level: displayConfidence)
                     Text(statusText)
                         .font(.system(.footnote, weight: .semibold))
@@ -245,13 +249,11 @@ struct ModelStatusButton: View {
                         .monospacedDigit()
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(.caption2, weight: .bold))
+                        .opacity(0.7)
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(.white.opacity(0.14))
-                .background(.ultraThinMaterial.opacity(0.58))
-                .clipShape(Capsule())
+                .foregroundStyle(.white.opacity(0.94))
+                .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                .padding(.vertical, 6)
             }
             .buttonStyle(.plain)
 
@@ -383,34 +385,38 @@ struct ThemeOptionButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 // Preview circle
                 ZStack {
                     Circle()
                         .fill(previewBackground)
-                        .frame(width: 64, height: 64)
+                        .frame(width: 52, height: 52)
                     Image(systemName: theme.icon)
-                        .font(.system(.title2, weight: .medium))
+                        .font(.system(.body, weight: .medium))
                         .foregroundStyle(previewForeground)
                 }
                 .overlay {
                     if isSelected {
                         Circle()
-                            .strokeBorder(Color.accentColor, lineWidth: 2.5)
-                            .frame(width: 64, height: 64)
+                            .strokeBorder(Color.accentColor, lineWidth: 2)
+                            .frame(width: 52, height: 52)
                     }
                 }
 
+                // Labels sit on the dark glass sheet — fixed white with a
+                // clear selected/unselected hierarchy in both color schemes.
                 Text(theme.label)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(.primary)
+                    .font(.system(.footnote, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(.white.opacity(isSelected ? 1.0 : 0.68))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.vertical, 10)
+            .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Darstellung \(theme.label)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var previewBackground: Color {

@@ -112,24 +112,29 @@ struct RainRadarScreen: View {
                         .clipShape(Circle())
                 }
                 Spacer()
-                timeline
+                // Legend docks directly above the timeline instead of
+                // floating over the map.
+                VStack(spacing: 8) {
+                    if showsLegend {
+                        RadarLegendView(
+                            attribution: store.timeline?.attribution,
+                            isFallbackSource: store.timeline?.source == .rainViewer
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showsLegend = false
+                            }
+                        }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    timeline
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
             }
 
             controls
-                .padding(.top, 64)
-                .padding(.trailing, 16)
-
-            if showsLegend {
-                RadarLegendView(attribution: store.timeline?.attribution) {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showsLegend = false
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 132)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+                .padding(.top, 58)
+                .padding(.trailing, 12)
 
             if let noticeText {
                 Text(noticeText)
@@ -168,47 +173,47 @@ struct RainRadarScreen: View {
         .statusBarHidden(false)
     }
 
+    // Single-line instrument header: back · title/location · time.
     private var header: some View {
         HStack(spacing: 10) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(.title3, weight: .semibold))
-                    .frame(width: 34, height: 34)
+                    .font(.system(.subheadline, weight: .semibold))
+                    .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
-            .background(.white.opacity(0.12), in: Circle())
-            .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 1))
+            .background(.white.opacity(0.10), in: Circle())
+            .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 1))
             .accessibilityLabel("Radar schließen")
 
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text("Radar")
-                        .font(.system(.headline, weight: .bold))
-                    Image(systemName: "location.fill")
-                        .font(.system(.caption2, weight: .bold))
-                        .opacity(0.9)
-                    Text(location?.name ?? "Deutschland")
-                        .font(.system(.footnote, weight: .semibold))
-                        .opacity(0.9)
-                        .lineLimit(1)
-                }
-                Text(store.selectedDateTimeLabel)
-                    .font(.system(.caption, weight: .semibold))
-                    .monospacedDigit()
-                    .opacity(0.80)
+            HStack(spacing: 6) {
+                Text("Radar")
+                    .font(.system(.subheadline, weight: .bold))
+                Text("·")
+                    .font(.system(.subheadline, weight: .semibold))
+                    .opacity(0.5)
+                Text(location?.name ?? "Deutschland")
+                    .font(.system(.subheadline, weight: .medium))
+                    .opacity(0.85)
+                    .lineLimit(1)
             }
 
             Spacer()
+
+            Text(store.selectedDateTimeLabel)
+                .font(.system(.caption, weight: .semibold))
+                .monospacedDigit()
+                .opacity(0.85)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 6)
-        .background(Color.black.opacity(0.10))
-        .background(.white.opacity(0.10))
-        .background(.ultraThinMaterial.opacity(0.78))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.45))
+        .background(.ultraThinMaterial.opacity(0.7))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(.white.opacity(0.18)).frame(height: 1)
+            Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
         }
     }
 
@@ -247,56 +252,57 @@ struct RainRadarScreen: View {
 
     @ViewBuilder
     private var timeline: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let error = store.errorMessage {
-                HStack(spacing: 12) {
-                    Text(error)
-                        .font(.system(.subheadline, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Button {
-                        Task { await store.retry() }
-                    } label: {
-                        Text("Erneut versuchen")
-                            .font(.system(.footnote, weight: .bold))
-                            .foregroundStyle(Color(hex: "#5f4500"))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color(hex: "#ffd166"))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 4)
-            } else if !store.visibleFrames.isEmpty {
-                RadarTimelineControl(
-                    frames: store.visibleFrames,
-                    selectedIndex: Binding(
-                        get: { store.selectedIndex },
-                        set: {
-                            store.isPlaying = false
-                            store.selectedIndex = $0
-                        }
-                    ),
-                    isPlaying: Binding(
-                        get: { store.isPlaying },
-                        set: { store.isPlaying = $0 }
-                    ),
-                    selectedTimeLabel: store.selectedTimeLabel,
-                    selectedDateLabel: store.selectedDateLabel,
-                    kindLabel: store.selectedFrameKindLabel
-                )
-            } else {
-                Text("Lade Radar...")
-                    .font(.system(.callout, weight: .semibold))
+        if let error = store.errorMessage {
+            HStack(spacing: 12) {
+                Text(error)
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(.white)
+                Spacer()
+                Button {
+                    Task { await store.retry() }
+                } label: {
+                    Text("Erneut versuchen")
+                        .font(.system(.footnote, weight: .bold))
+                        .foregroundStyle(AppColors.selectionText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(AppColors.selection)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
+            .padding(12)
+            .background(Color.black.opacity(0.45))
+            .background(.ultraThinMaterial.opacity(0.7))
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
+        } else if !store.visibleFrames.isEmpty {
+            RadarTimelineControl(
+                frames: store.visibleFrames,
+                selectedIndex: Binding(
+                    get: { store.selectedIndex },
+                    set: {
+                        store.isPlaying = false
+                        store.selectedIndex = $0
+                    }
+                ),
+                isPlaying: Binding(
+                    get: { store.isPlaying },
+                    set: { store.isPlaying = $0 }
+                ),
+                selectedTimeLabel: store.selectedTimeLabel,
+                selectedDateLabel: store.selectedDateLabel,
+                kindLabel: store.selectedFrameKindLabel
+            )
+        } else {
+            Text("Lade Radar…")
+                .font(.system(.footnote, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+                .padding(12)
+                .frame(maxWidth: .infinity)
+                .background(Color.black.opacity(0.45))
+                .background(.ultraThinMaterial.opacity(0.7))
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 6)
-        .background(.black.opacity(0.28))
-        .background(.ultraThinMaterial.opacity(0.72))
     }
 
     private func showNotice(_ text: String) {
