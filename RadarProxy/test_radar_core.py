@@ -48,6 +48,28 @@ class EnsureCacheTests(unittest.TestCase):
         self.assertIs(result[0], stale)
 
 
+class PaletteSyncTests(unittest.TestCase):
+    """Guards the manual color sync between server (RAIN_COLOR_STEPS) and the
+    iOS legend (RadarLegendStep.steps). Fails in CI if they drift apart."""
+
+    def test_legend_hex_matches_server_rgb(self) -> None:
+        import re
+        swift_path = os.path.join(
+            os.path.dirname(__file__), "..", "WeatherMat", "Views", "Weather", "Radar", "RadarWidgets.swift"
+        )
+        if not os.path.exists(swift_path):
+            self.skipTest("iOS legend source not available in this checkout")
+        source = open(swift_path, encoding="utf-8").read()
+        block = source.split("static let steps")[1].split("]")[0]
+        hexes = re.findall(r'Color\(hex:\s*"#([0-9a-fA-F]{6})"\)', block)
+        legend_rgb = [tuple(int(h[i:i + 2], 16) for i in (0, 2, 4)) for h in hexes]
+        server_rgb = [color[:3] for _, _, color in app.RAIN_COLOR_STEPS]
+        self.assertEqual(
+            legend_rgb, server_rgb,
+            "iOS legend palette drifted from server RAIN_COLOR_STEPS",
+        )
+
+
 class RadarCoreTests(unittest.TestCase):
     def test_precipitation_type_uses_wet_area_fraction(self) -> None:
         intensity = np.array([[0.10, 0.20], [0.30, 0.40]])

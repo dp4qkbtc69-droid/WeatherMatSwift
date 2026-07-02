@@ -1125,7 +1125,10 @@ def _icon_raw_index_for_run(variable: str, run_hour: str) -> Dict[int, str]:
     try:
         with urllib.request.urlopen(directory, timeout=18) as response:
             html = response.read().decode("utf-8", errors="ignore")
-    except Exception:
+    except Exception as error:
+        # Not fatal (a run may not be published yet), but a persistent failure
+        # here silently disables forecast frames — keep it visible in logs.
+        logger.debug("ICON index fetch failed for %s/%s: %s", run_hour, variable, error)
         return {}
     suffix = variable.upper()
     result: Dict[int, str] = {}
