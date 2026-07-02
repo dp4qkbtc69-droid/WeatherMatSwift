@@ -86,9 +86,13 @@ HOTSPOT_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_ZO
 RADAR_PROXY_TOKEN = os.environ.get("RADAR_PROXY_TOKEN") or os.environ.get("WEATHERMAT_RADAR_TOKEN") or ""
 DISK_CACHE_DIR = Path(os.environ["RADAR_DISK_CACHE_DIR"]) if os.environ.get("RADAR_DISK_CACHE_DIR") else None
 TILE_SIZE = 512
+try:
+    TILE_RENDER_SCALE = max(1, min(4, int(os.environ.get("RADAR_TILE_RENDER_SCALE", "2"))))
+except ValueError:
+    TILE_RENDER_SCALE = 2
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
-APP_VERSION = "hybrid-palette-2026-07-02"
+APP_VERSION = "hybrid-palette-smooth-tiles-2026-07-02"
 
 # Hybrid rain palette: blue for light/moderate rain, warning colors
 # (yellow/orange/red) from "kraeftig" upwards. Must stay in sync with
@@ -1577,10 +1581,22 @@ def _render_tile(image: Image.Image, z: int, x: int, y: int) -> bytes:
         int(round((tile_north - south) / (tile_north - tile_south) * TILE_SIZE)),
     )
 
-    out = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
+    scale = TILE_RENDER_SCALE
+    output_size = TILE_SIZE * scale
+    out = Image.new("RGBA", (output_size, output_size), (0, 0, 0, 0))
+    scaled_target = tuple(value * scale for value in target)
     crop = image.crop(source)
-    crop = crop.resize((max(1, target[2] - target[0]), max(1, target[3] - target[1])), Image.Resampling.NEAREST)
-    out.alpha_composite(crop, dest=(target[0], target[1]))
+    crop = crop.resize(
+        (
+            max(1, scaled_target[2] - scaled_target[0]),
+            max(1, scaled_target[3] - scaled_target[1]),
+        ),
+        Image.Resampling.BILINEAR,
+    )
+    out.alpha_composite(crop, dest=(scaled_target[0], scaled_target[1]))
+
+    if scale > 1:
+        out = out.resize((TILE_SIZE, TILE_SIZE), Image.Resampling.LANCZOS)
 
     buffer = io.BytesIO()
     out.save(buffer, format="PNG", optimize=False, compress_level=1)
