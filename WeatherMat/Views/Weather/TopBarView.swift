@@ -64,7 +64,7 @@ struct TopBarView: View {
                             selectedDayIndex: vm.selectedDayIndex,
                             isExpanded: $showModelDetails
                         )
-                        .frame(maxWidth: 214, alignment: .trailing)
+                        .frame(maxWidth: 236, alignment: .trailing)
 
                         // Secondary action: quiet ghost pill.
                         Button {
@@ -75,27 +75,31 @@ struct TopBarView: View {
                         } label: {
                             Label("Wetter melden", systemImage: "cloud.rain.fill")
                                 .font(.system(.caption, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 6)
-                                .background(.white.opacity(0.10))
-                                .clipShape(Capsule())
+                                .foregroundStyle(AppColors.Text.secondary)
+                                .quietActionPill()
                         }
                         .buttonStyle(.plain)
+                        .accessibilityHint("Öffnet Schnellmeldungen zum aktuellen Wetter")
 
                         // Primary navigation: the strongest element in the cluster.
                         Button {
                             HapticService.impact(.light)
                             openRainRadar()
                         } label: {
-                            Image(systemName: "map.fill")
-                                .font(.system(.body, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 42, height: 42)
-                                .background(.white.opacity(0.18))
-                                .background(.ultraThinMaterial.opacity(0.7))
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 1))
+                            VStack(spacing: 3) {
+                                Image(systemName: "map.fill")
+                                    .font(.system(.body, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 42, height: 42)
+                                    .background(AppColors.Surface.primaryAction)
+                                    .background(.ultraThinMaterial.opacity(0.7))
+                                    .clipShape(Circle())
+                                    .overlay(Circle().stroke(AppColors.Stroke.primary, lineWidth: 1))
+                                Text("Radar")
+                                    .font(.system(.caption2, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.86))
+                                    .shadow(color: .black.opacity(0.25), radius: 1, x: 0, y: 1)
+                            }
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Regenradar öffnen")
@@ -105,7 +109,7 @@ struct TopBarView: View {
                                 showFeedbackDialog = false
                                 vm.submitWeatherFeedback(feedback)
                             }
-                            .frame(maxWidth: 168, alignment: .trailing)
+                            .frame(maxWidth: 204, alignment: .trailing)
                             .transition(.scale(scale: 0.94, anchor: .topTrailing).combined(with: .opacity))
                         }
                     }
@@ -138,22 +142,24 @@ private struct WeatherFeedbackPanel: View {
                     HapticService.impact(.light)
                     submit(feedback)
                 } label: {
-                    VStack(spacing: 6) {
+                    HStack(spacing: 10) {
                         Image(systemName: feedback.quickReportIcon)
                             .symbolRenderingMode(.hierarchical)
-                            .font(.system(.title2, weight: .semibold))
+                            .font(.system(.title3, weight: .semibold))
                             .foregroundStyle(feedback.quickReportTint)
-                            .frame(height: 24)
+                            .frame(width: 34, height: 28)
 
                         Text(feedback.compactLabel)
-                            .font(.system(.caption, weight: .bold))
-                            .multilineTextAlignment(.center)
+                            .font(.system(.callout, weight: .bold))
+                            .multilineTextAlignment(.leading)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.78)
+                            .minimumScaleFactor(0.72)
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.22), radius: 1, x: 0, y: 1)
+                        Spacer(minLength: 0)
                     }
-                    .frame(width: 152, height: 54)
+                    .padding(.horizontal, 12)
+                    .frame(width: 188, height: 52)
                     .background(Color.black.opacity(0.18))
                     .background(.white.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -181,6 +187,7 @@ struct ModelStatusButton: View {
     let confidenceBands:  [ForecastConfidenceBand]
     var selectedDayIndex: Int? = nil
     @Binding var isExpanded: Bool
+    @State private var showModelInfo = false
 
     private var displayConfidence: ConfidenceLevel {
         selectedBand?.confidence ?? confidence
@@ -238,8 +245,8 @@ struct ModelStatusButton: View {
                     isExpanded.toggle()
                 }
             } label: {
-                // Information, not a control: plain text with a subtle shadow —
-                // the pill weight is reserved for actions.
+                // Status first, disclosure second: a light outline makes the
+                // affordance clear without competing with primary actions.
                 HStack(spacing: 6) {
                     TrafficLightView(level: displayConfidence)
                     Text(statusText)
@@ -251,38 +258,76 @@ struct ModelStatusButton: View {
                         .font(.system(.caption2, weight: .bold))
                         .opacity(0.7)
                 }
-                .foregroundStyle(.white.opacity(0.94))
+                .foregroundStyle(AppColors.Text.primary)
                 .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 6)
+                .background(AppColors.Surface.selectedMuted)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(isExpanded ? AppColors.selection.opacity(0.65) : AppColors.Stroke.control, lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Modellstatus \(statusText), \(displayAgreementPct) Prozent")
+            .accessibilityHint(isExpanded ? "Schließt Details zur Modell-Einigkeit" : "Öffnet Details zur Modell-Einigkeit")
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 7) {
-                    Label(horizonLabel, systemImage: "calendar")
-                        .font(.system(.footnote, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
+                    HStack(spacing: 8) {
+                        Label(horizonLabel, systemImage: "calendar")
+                            .font(.system(.footnote, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+
+                        Spacer()
+
+                        Button {
+                            HapticService.impact(.light)
+                            withAnimation(.easeInOut(duration: 0.16)) {
+                                showModelInfo.toggle()
+                            }
+                        } label: {
+                            Image(systemName: showModelInfo ? "info.circle.fill" : "info.circle")
+                                .font(.system(.footnote, weight: .bold))
+                                .foregroundStyle(showModelInfo ? AppColors.selection : .white.opacity(0.76))
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showModelInfo ? "Modellinformationen ausblenden" : "Modellinformationen anzeigen")
+                    }
 
                     if !confidenceBands.isEmpty {
                         ConfidenceBandsView(bands: confidenceBands)
                     }
 
-                    Text("Stärkste Modelle: \(dominantLabel)")
-                        .font(.system(.footnote, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
+                    if showModelInfo {
+                        Divider()
+                            .background(.white.opacity(0.14))
+                            .padding(.vertical, 2)
 
-                    Text(activeModels.isEmpty ? "Aktuell keine Quellen aktiv" : activeModels.joined(separator: " · "))
-                        .font(.system(.caption, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(3)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Stärkste Modelle")
+                                .font(.system(.caption2, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.70))
+                            Text(dominantLabel)
+                                .font(.system(.caption, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.94))
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.76)
+
+                            Text(activeModels.isEmpty ? "Keine Quellen aktiv" : activeModels.joined(separator: " · "))
+                                .font(.system(.caption2, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.66))
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.76)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
                 .padding(12)
-                .frame(width: 214, alignment: .leading)
-                .background(Color.black.opacity(0.12))
-                .background(.white.opacity(0.12))
-                .background(.ultraThinMaterial.opacity(0.78))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .frame(width: 236, alignment: .leading)
+                .instrumentPanel()
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -304,10 +349,13 @@ private struct ConfidenceBandsView: View {
                     Text(band.title)
                         .font(.system(.caption2, weight: .bold))
                         .foregroundStyle(.white.opacity(0.84))
-                        .frame(width: 42, alignment: .leading)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .frame(width: 56, alignment: .leading)
                     Text(band.subtitle)
                         .font(.system(.caption2, weight: .medium))
                         .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
                     Spacer()
                     Text("\(band.agreementPct)%")
                         .font(.system(.caption2, weight: .bold))
@@ -382,6 +430,7 @@ struct ThemeOptionButton: View {
     let theme:      AppTheme
     let isSelected: Bool
     let action:     () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: action) {
@@ -407,11 +456,11 @@ struct ThemeOptionButton: View {
                 // clear selected/unselected hierarchy in both color schemes.
                 Text(theme.label)
                     .font(.system(.footnote, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(.white.opacity(isSelected ? 1.0 : 0.68))
+                    .foregroundStyle(labelColor.opacity(isSelected ? 1.0 : 0.64))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+            .background(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.10 : 0.16) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
         }
         .buttonStyle(.plain)
@@ -421,17 +470,21 @@ struct ThemeOptionButton: View {
 
     private var previewBackground: Color {
         switch theme {
-        case .system: return Color(.systemFill)
-        case .light:  return Color(.systemBackground).opacity(0.1)
+        case .system: return colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.08)
+        case .light:  return Color.white.opacity(colorScheme == .dark ? 0.18 : 0.92)
         case .dark:   return Color(white: 0.15)
         }
     }
 
     private var previewForeground: Color {
         switch theme {
-        case .system: return .primary
+        case .system: return colorScheme == .dark ? .white : Color(hex: "#101820")
         case .light:  return Color(hue: 0.11, saturation: 0.85, brightness: 0.92)
         case .dark:   return Color(hue: 0.65, saturation: 0.45, brightness: 0.85)
         }
+    }
+
+    private var labelColor: Color {
+        colorScheme == .dark ? .white : Color(hex: "#0d3142")
     }
 }

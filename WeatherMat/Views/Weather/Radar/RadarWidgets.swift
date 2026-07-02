@@ -17,13 +17,13 @@ struct RadarRoundButton: View {
             Image(systemName: icon)
                 .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(selected ? AppColors.selection : .white.opacity(0.88))
-                .frame(width: 44, height: 44)
-                .background(Color.black.opacity(0.30))
+                .frame(width: DesignTokens.Control.circle, height: DesignTokens.Control.circle)
+                .background(AppColors.Surface.instrumentControl)
                 .background(.ultraThinMaterial.opacity(0.7))
                 .clipShape(Circle())
                 .overlay(
                     Circle().stroke(
-                        selected ? AppColors.selection.opacity(0.9) : .white.opacity(0.16),
+                        selected ? AppColors.selection.opacity(0.9) : AppColors.Stroke.control,
                         lineWidth: selected ? 1.5 : 1
                     )
                 )
@@ -100,20 +100,14 @@ struct RadarLegendView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(Color.black.opacity(0.45))
-        .background(.ultraThinMaterial.opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignTokens.radiusSmall)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        )
+        .instrumentPanel()
     }
 
     private var footerText: String {
         if isFallbackSource {
             return attribution ?? "RainViewer"
         }
-        return "DWD-Radarkomposit · 1-km-Raster · Vorhersage: ICON-EU"
+        return "DWD-Radarkomposit · Vorhersage: ICON-EU"
     }
 }
 

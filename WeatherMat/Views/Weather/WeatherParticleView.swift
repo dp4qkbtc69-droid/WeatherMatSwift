@@ -21,9 +21,9 @@ struct WeatherParticleView: View {
             background.gradient(for: colorScheme)
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.10),
-                    Color.black.opacity(0.02),
-                    Color.black.opacity(0.16)
+                    Color.black.opacity(colorScheme == .dark ? 0.22 : 0.14),
+                    Color.black.opacity(colorScheme == .dark ? 0.08 : 0.03),
+                    Color.black.opacity(colorScheme == .dark ? 0.30 : 0.20)
                 ],
                 startPoint: .top,
                 endPoint: .bottom

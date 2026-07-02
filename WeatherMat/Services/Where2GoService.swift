@@ -195,7 +195,10 @@ final class Where2GoService: Sendable {
         var named: [Where2GoSpot] = []
         for spot in spots {
             let location = CLLocation(latitude: spot.coordinate.latitude, longitude: spot.coordinate.longitude)
-            let name = await GeocodingService.shared.reverseGeocode(location)
+            let resolvedName = await GeocodingService.shared.reverseGeocode(location)
+            let name = GeocodingService.isCoordinateFallback(resolvedName)
+                ? fallbackName(for: Where2GoCandidate(coordinate: spot.coordinate, distanceKm: spot.distanceKm, bearing: bearing(for: spot.direction)))
+                : resolvedName
             named.append(
                 Where2GoSpot(
                     name: name,
@@ -218,6 +221,20 @@ final class Where2GoService: Sendable {
     private func fallbackName(for candidate: Where2GoCandidate) -> String {
         if candidate.distanceKm == 0 { return "Hier" }
         return "\(directionName(for: candidate.bearing)), \(candidate.distanceKm) km"
+    }
+
+    private func bearing(for direction: String) -> Double? {
+        switch direction {
+        case "N": return 0
+        case "NO": return 45
+        case "O": return 90
+        case "SO": return 135
+        case "S": return 180
+        case "SW": return 225
+        case "W": return 270
+        case "NW": return 315
+        default: return nil
+        }
     }
 
     private func directionName(for bearing: Double?) -> String {

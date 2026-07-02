@@ -46,7 +46,7 @@ final class GeocodingService: Sendable {
         let lat = location.coordinate.latitude
         let lon = location.coordinate.longitude
         let key = reverseCoordinateKey(lat: lat, lon: lon)
-        if let cached = cachedReverseName(for: key) {
+        if let cached = cachedReverseName(for: key), !Self.isCoordinateFallback(cached) {
             return cached
         }
 
@@ -59,9 +59,11 @@ final class GeocodingService: Sendable {
             return name
         }
 
-        let fallback = String(format: "%.2f°, %.2f°", lat, lon)
-        cacheReverseName(fallback, for: key)
-        return fallback
+        return String(format: "%.2f°, %.2f°", lat, lon)
+    }
+
+    static func isCoordinateFallback(_ name: String) -> Bool {
+        name.contains("°") || name.range(of: #"^-?\d+([.,]\d+)?\s*,\s*-?\d+([.,]\d+)?"#, options: .regularExpression) != nil
     }
 
     private func reverseCoordinateKey(lat: Double, lon: Double) -> String {
@@ -145,9 +147,23 @@ final class GeocodingService: Sendable {
         var req = URLRequest(url: c.url!)
         req.setValue("WeatherMat/2.0", forHTTPHeaderField: "User-Agent")
         let (data, _) = try await URLSession.shared.data(for: req)
-        struct R: Decodable { struct A: Decodable { let city,town,village,county: String? }; let address: A? }
+        struct R: Decodable {
+            struct A: Decodable {
+                let city, town, village, municipality, hamlet, suburb, city_district, county, state_district: String?
+            }
+            let display_name: String?
+            let address: A?
+        }
         let r = try JSONDecoder().decode(R.self, from: data)
-        return r.address.flatMap { $0.city ?? $0.town ?? $0.village ?? $0.county }
+        if let address = r.address {
+            if let name = address.city ?? address.town ?? address.village ?? address.municipality ?? address.hamlet ?? address.suburb ?? address.city_district ?? address.county ?? address.state_district {
+                return name
+            }
+        }
+        return r.display_name?
+            .split(separator: ",")
+            .first
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 }
 

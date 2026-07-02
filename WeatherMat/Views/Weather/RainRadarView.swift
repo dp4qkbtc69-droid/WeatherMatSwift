@@ -76,10 +76,11 @@ struct RainRadarScreen: View {
     let location: SavedLocation?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var store = RadarV2Store()
     @State private var mapRegion = rainRadarHomeRegion
     @State private var regionRevision = 0
-    @State private var enabledLayers = Set<DwdWMSLayer>()
+    @State private var enabledLayers: Set<DwdWMSLayer> = [.lightningDensity]
     @State private var showsLegend = false
     @State private var noticeText: String?
     // Chrome visibility state: header + rail hide after inactivity during
@@ -119,7 +120,7 @@ struct RainRadarScreen: View {
                             attribution: store.timeline?.attribution,
                             isFallbackSource: store.timeline?.source == .rainViewer
                         ) {
-                            withAnimation(.easeInOut(duration: 0.18)) {
+                            withRadarAnimation(.quick) {
                                 showsLegend = false
                             }
                             registerInteraction()
@@ -213,7 +214,7 @@ struct RainRadarScreen: View {
     private func showChrome() {
         chromeHideTask?.cancel()
         if chromeHidden {
-            withAnimation(.easeInOut(duration: 0.25)) {
+            withRadarAnimation(.reveal) {
                 chromeHidden = false
             }
         }
@@ -225,16 +226,36 @@ struct RainRadarScreen: View {
     private func scheduleChromeHide() {
         chromeHideTask?.cancel()
         chromeHideTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: DesignTokens.Motion.chromeIdleDelayNanoseconds)
             guard !Task.isCancelled else { return }
             guard store.isPlaying,
                   !showsLegend,
                   store.errorMessage == nil,
                   !store.isLoading else { return }
-            withAnimation(.easeInOut(duration: 0.35)) {
+            withRadarAnimation(.hide) {
                 chromeHidden = true
             }
         }
+    }
+
+    private enum RadarAnimationKind {
+        case quick
+        case reveal
+        case hide
+        case map
+
+        var duration: Double {
+            switch self {
+            case .quick: return DesignTokens.Motion.quick
+            case .reveal: return DesignTokens.Motion.chromeReveal
+            case .hide: return DesignTokens.Motion.chromeHide
+            case .map: return DesignTokens.Motion.standard
+            }
+        }
+    }
+
+    private func withRadarAnimation(_ kind: RadarAnimationKind, _ changes: () -> Void) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: kind.duration), changes)
     }
 
     // Single-line instrument header: back · title/location · time.
@@ -250,19 +271,11 @@ struct RainRadarScreen: View {
             .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 1))
             .accessibilityLabel("Radar schließen")
 
-            HStack(spacing: 6) {
-                Text("Radar")
-                    .font(.system(.subheadline, weight: .bold))
-                Text("·")
-                    .font(.system(.subheadline, weight: .semibold))
-                    .opacity(0.5)
-                Text(location?.name ?? "Deutschland")
-                    .font(.system(.subheadline, weight: .medium))
-                    .opacity(0.85)
-                    .lineLimit(1)
-            }
+            RadarHeaderTitle(locationName: location?.name ?? "Deutschland")
+                .frame(maxWidth: 172, alignment: .leading)
+                .layoutPriority(0)
 
-            Spacer()
+            Spacer(minLength: 4)
 
             Text(store.selectedDateTimeLabel)
                 .font(.system(.caption, weight: .semibold))
@@ -270,14 +283,16 @@ struct RainRadarScreen: View {
                 .opacity(0.85)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .frame(minWidth: 132, alignment: .trailing)
+                .layoutPriority(3)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.black.opacity(0.45))
+        .background(AppColors.Surface.instrumentDark)
         .background(.ultraThinMaterial.opacity(0.7))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
+            Rectangle().fill(AppColors.Stroke.faint).frame(height: 1)
         }
     }
 
@@ -288,7 +303,7 @@ struct RainRadarScreen: View {
                     showNotice("Kein Ort verfügbar")
                     return
                 }
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withRadarAnimation(.map) {
                     mapRegion = MKCoordinateRegion(
                         center: userCoordinate,
                         span: MKCoordinateSpan(latitudeDelta: 2.6, longitudeDelta: 2.6)
@@ -300,13 +315,13 @@ struct RainRadarScreen: View {
                 showNotice("Radar aktiv")
             }
             RadarRoundButton(icon: "bolt.fill", selected: enabledLayers.contains(.lightningDensity), accessibilityLabel: "Blitzdichte umschalten") {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withRadarAnimation(.quick) {
                     toggleLayer(.lightningDensity)
                 }
                 showNotice(enabledLayers.contains(.lightningDensity) ? "DWD-Blitzdichte aktiv" : "DWD-Blitzdichte aus")
             }
             RadarRoundButton(icon: "info.circle.fill", selected: showsLegend, accessibilityLabel: "Legende umschalten") {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withRadarAnimation(.quick) {
                     showsLegend.toggle()
                 }
             }
@@ -338,9 +353,7 @@ struct RainRadarScreen: View {
                 .buttonStyle(.plain)
             }
             .padding(12)
-            .background(Color.black.opacity(0.45))
-            .background(.ultraThinMaterial.opacity(0.7))
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
+            .instrumentPanel()
         } else if !store.visibleFrames.isEmpty {
             RadarTimelineControl(
                 frames: store.visibleFrames,
@@ -373,20 +386,18 @@ struct RainRadarScreen: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity)
-            .background(Color.black.opacity(0.45))
-            .background(.ultraThinMaterial.opacity(0.7))
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
+            .instrumentPanel()
         }
     }
 
     private func showNotice(_ text: String) {
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withRadarAnimation(.quick) {
             noticeText = text
         }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_800_000_000)
             if noticeText == text {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withRadarAnimation(.quick) {
                     noticeText = nil
                 }
             }
@@ -399,5 +410,83 @@ struct RainRadarScreen: View {
         } else {
             enabledLayers.insert(layer)
         }
+    }
+}
+
+private struct RadarHeaderTitle: View {
+    let locationName: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            MarqueeText(locationName)
+                .font(.system(.subheadline, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.90))
+        }
+    }
+}
+
+private struct MarqueeText: View {
+    let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var animate = false
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    private var shouldScroll: Bool {
+        textWidth > containerWidth + 4 && !reduceMotion
+    }
+
+    private var travelDistance: CGFloat {
+        max(0, textWidth - containerWidth + 28)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            HStack(spacing: 28) {
+                measuredText
+                if shouldScroll {
+                    measuredText
+                }
+            }
+            .offset(x: shouldScroll && animate ? -travelDistance : 0)
+            .animation(
+                shouldScroll ? .linear(duration: max(5.5, Double(text.count) * 0.18)).repeatForever(autoreverses: false) : nil,
+                value: animate
+            )
+            .frame(width: width, alignment: .leading)
+            .clipped()
+            .onAppear {
+                containerWidth = width
+                animate = shouldScroll
+            }
+            .onChange(of: width) { _, newValue in
+                containerWidth = newValue
+                animate = shouldScroll
+            }
+            .onChange(of: textWidth) { _, _ in
+                animate = shouldScroll
+            }
+        }
+        .frame(height: 22)
+    }
+
+    private var measuredText: some View {
+        Text(text)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { textWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { _, newValue in
+                            textWidth = newValue
+                        }
+                }
+            )
     }
 }

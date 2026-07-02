@@ -63,10 +63,10 @@ struct HourlyView: View {
                     Text("\(step) h")
                         .font(.system(.footnote, weight: .bold))
                         .monospacedDigit()
-                        .foregroundStyle(hourStep == step ? Color(hex: "#5b3b00") : .white.opacity(0.82))
+                        .foregroundStyle(hourStep == step ? AppColors.selectionText : .white.opacity(0.82))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
-                        .background(hourStep == step ? Color(hex: "#ffd166") : Color.clear)
+                        .background(hourStep == step ? AppColors.selection : Color.clear)
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -153,6 +153,11 @@ struct HourlyCellView: View {
         .padding(.vertical, 8)
         .background(isFirst ? Color.black.opacity(0.10) : .clear)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(timeString), \(entry.condition.label), \(entry.temp) Grad, "
+            + "\(entry.precipitationProbability) Prozent Niederschlag, \(entry.windSpeed) km/h Wind"
+        )
     }
 
     private var precipColor: Color {

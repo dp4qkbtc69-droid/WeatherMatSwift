@@ -3,6 +3,7 @@ import SwiftUI
 
 struct RainBannerView: View {
     let rain: RainAnalysis
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if shouldShowBanner { banner }
@@ -37,7 +38,7 @@ struct RainBannerView: View {
                 Image(systemName: displaySymbol)
                     .symbolRenderingMode(.multicolor)
                     .font(.system(size: 26))
-                    .symbolEffect(.pulse.byLayer, options: .repeating, isActive: rain.type == .now)
+                    .symbolEffect(.pulse.byLayer, options: .repeating, isActive: rain.type == .now && !reduceMotion)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(displayText)

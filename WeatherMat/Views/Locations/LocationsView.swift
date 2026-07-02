@@ -4,6 +4,7 @@ import SwiftUI
 struct LocationsView: View {
     @Environment(WeatherViewModel.self) private var vm
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var searchText  = ""
     @State private var results:    [GeocodedLocation] = []
@@ -15,14 +16,20 @@ struct LocationsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Consistent dark-sky gradient matching the app's night tone
                 LinearGradient(
-                    colors: [Color(hex: "#1a2540"), Color(hex: "#0a0f1e")],
+                    colors: colorScheme == .dark
+                        ? [Color(hex: "#1a2540"), Color(hex: "#0a0f1e")]
+                        : [Color(hex: "#7fd3ef"), Color(hex: "#2f92cc")],
                     startPoint: .top, endPoint: .bottom
                 )
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    locationsHeader
+                        .padding(.horizontal)
+                        .padding(.top, 12)
+                        .padding(.bottom, 12)
+
                     if isReordering {
                         reorderList
                     } else {
@@ -65,44 +72,77 @@ struct LocationsView: View {
                     }
                 }
             }
-            .navigationTitle("Orte")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Schließen") { dismiss() }
-                        .foregroundStyle(.white)
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await vm.useGPSLocation(); dismiss() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "location.fill")
-                            Text("GPS")
-                                .font(.subheadline)
-                        }
-                        .foregroundStyle(.cyan)
-                    }
-                    .disabled(isReordering)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if vm.savedLocations.count > 1 {
-                        Button(isReordering ? "Fertig" : "Sortieren") {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                isReordering.toggle()
-                                searchText = ""
-                                results = []
-                                isSearching = false
-                                searchTask?.cancel()
-                            }
-                        }
-                        .foregroundStyle(.white)
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
         }
+    }
+
+    private var locationsHeader: some View {
+        HStack(spacing: 10) {
+            Button {
+                Task { await vm.useGPSLocation(); dismiss() }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "location.fill")
+                        .font(.system(.headline, weight: .bold))
+                    Text("GPS")
+                        .font(.system(.subheadline, weight: .semibold))
+                }
+                .foregroundStyle(Color(hex: "#00bfe8"))
+                .padding(.horizontal, 15)
+                .frame(height: 44)
+                .background(headerPillBackground)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isReordering)
+            .opacity(isReordering ? 0.45 : 1)
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 0) {
+                if vm.savedLocations.count > 1 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isReordering.toggle()
+                            searchText = ""
+                            results = []
+                            isSearching = false
+                            searchTask?.cancel()
+                        }
+                    } label: {
+                        Image(systemName: isReordering ? "checkmark" : "arrow.up.arrow.down")
+                            .font(.system(.subheadline, weight: .bold))
+                            .foregroundStyle(isReordering ? Color(hex: "#00bfe8") : headerTextColor)
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel(isReordering ? "Sortieren fertig" : "Orte sortieren")
+
+                    Rectangle()
+                        .fill(headerTextColor.opacity(0.18))
+                        .frame(width: 1, height: 22)
+                }
+
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(.subheadline, weight: .bold))
+                        .foregroundStyle(headerTextColor)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Schließen")
+            }
+            .background(headerPillBackground)
+            .clipShape(Capsule())
+        }
+    }
+
+    private var headerPillBackground: some ShapeStyle {
+        colorScheme == .dark
+            ? AnyShapeStyle(Color.white.opacity(0.10))
+            : AnyShapeStyle(Color.white.opacity(0.52))
+    }
+
+    private var headerTextColor: Color {
+        colorScheme == .dark ? .white.opacity(0.94) : Color(hex: "#0b3446")
     }
 
     private var reorderList: some View {
@@ -274,6 +314,7 @@ struct LocationsView: View {
 // MARK: - Settings section
 struct SettingsSectionView: View {
     @Environment(WeatherViewModel.self) private var vm
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appTheme") private var themeName: String = AppTheme.system.rawValue
     @State private var showResetCalibrationConfirm = false
     @State private var showClearCacheConfirm = false
@@ -284,17 +325,17 @@ struct SettingsSectionView: View {
             HStack(spacing: 6) {
                 Image(systemName: "gearshape.fill")
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.66))
+                    .foregroundStyle(settingsSecondaryText)
                 Text("Einstellungen")
                     .font(.system(.subheadline, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(settingsSecondaryText)
             }
             .padding(.horizontal, 4)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Darstellung")
                     .font(.system(.callout, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.88))
+                    .foregroundStyle(settingsPrimaryText)
 
                 HStack(spacing: 10) {
                     ForEach(AppTheme.allCases) { t in
@@ -312,9 +353,7 @@ struct SettingsSectionView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(.white.opacity(0.07))
-            .background(.ultraThinMaterial.opacity(0.3))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .glassCard(cornerRadius: 16)
 
             DataSourceStatusView(activeModels: vm.weatherData?.activeModels ?? [])
 
@@ -359,9 +398,7 @@ struct SettingsSectionView: View {
                     showResetCalibrationConfirm = true
                 }
             }
-            .background(.white.opacity(0.07))
-            .background(.ultraThinMaterial.opacity(0.3))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .glassCard(cornerRadius: 16)
         }
         .confirmationDialog("Wettercache leeren?", isPresented: $showClearCacheConfirm, titleVisibility: .visible) {
             Button("Cache leeren") {
@@ -382,9 +419,18 @@ struct SettingsSectionView: View {
             Text("Die App verwirft nur lokale Gewichtungen. Wetterdaten und Orte bleiben erhalten.")
         }
     }
+
+    private var settingsPrimaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.90) : Color(hex: "#0d3142")
+    }
+
+    private var settingsSecondaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.70) : Color(hex: "#245168").opacity(0.82)
+    }
 }
 
 struct DataSourceStatusView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("weatherKitLastStatus_v1") private var weatherKitLastStatus = ""
     @AppStorage("netatmoLastStatus_v1") private var netatmoLastStatus = ""
     let activeModels: [String]
@@ -404,13 +450,13 @@ struct DataSourceStatusView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Datenquellen")
                 .font(.system(.callout, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.88))
+                .foregroundStyle(primaryText)
 
             StatusPill(
                 icon: weatherKitActive ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
                 title: "WeatherKit",
                 subtitle: weatherKitSubtitle,
-                tint: weatherKitActive ? .green : .orange
+                tint: weatherKitActive ? AppColors.Status.success : AppColors.Status.warning
             )
 
             HStack(spacing: 10) {
@@ -418,25 +464,28 @@ struct DataSourceStatusView: View {
                     icon: activeModels.isEmpty ? "clock.fill" : "checkmark.circle.fill",
                     title: "Modelle",
                     subtitle: activeModels.isEmpty ? "warte" : "\(activeModels.count) aktiv",
-                    tint: activeModels.isEmpty ? .orange : .cyan
+                    tint: activeModels.isEmpty ? AppColors.Status.warning : AppColors.Status.info
                 )
                 StatusPill(
                     icon: netatmoLastStatus == "aktiv" ? "checkmark.circle.fill" : "sensor.tag.radiowaves.forward.fill",
                     title: "Netatmo",
                     subtitle: netatmoLastStatus.isEmpty ? "nicht verbunden" : netatmoLastStatus,
-                    tint: netatmoLastStatus == "aktiv" ? .green : .orange
+                    tint: netatmoLastStatus == "aktiv" ? AppColors.Status.success : AppColors.Status.warning
                 )
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(.white.opacity(0.07))
-        .background(.ultraThinMaterial.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .glassCard(cornerRadius: 16)
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.90) : Color(hex: "#0d3142")
     }
 }
 
 struct StatusPill: View {
+    @Environment(\.colorScheme) private var colorScheme
     let icon: String
     let title: String
     let subtitle: String
@@ -444,16 +493,23 @@ struct StatusPill: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(.subheadline, weight: .semibold))
-                .foregroundStyle(tint)
+            ZStack {
+                Circle()
+                    .fill(colorScheme == .dark ? tint.opacity(0.18) : tint)
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.system(.caption, weight: .bold))
+                    .foregroundStyle(iconColor)
+            }
+            .shadow(color: tint.opacity(colorScheme == .dark ? 0.00 : 0.22), radius: 3, x: 0, y: 1)
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(.footnote, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(primaryText)
                 Text(subtitle)
                     .font(.system(.caption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.64))
+                    .foregroundStyle(secondaryText)
                     .lineLimit(3)
                     .minimumScaleFactor(0.82)
             }
@@ -461,12 +517,31 @@ struct StatusPill: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.white.opacity(0.07))
+        .background(colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(colorScheme == .dark ? 0.04 : 0.12), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // Light mode: white glyph on a solid color tile (Apple Settings style,
+    // high contrast). Dark mode: bright glyph on a faint tinted circle.
+    private var iconColor: Color {
+        colorScheme == .dark ? tint : .white
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.90) : Color(hex: "#0d3142")
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.64) : Color(hex: "#315d72").opacity(0.78)
     }
 }
 
 struct SettingsActionRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let icon: String
     let title: String
     let subtitle: String
@@ -478,20 +553,21 @@ struct SettingsActionRow: View {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(tint.opacity(0.18))
+                        .fill(colorScheme == .dark ? tint.opacity(0.18) : tint)
                         .frame(width: 36, height: 36)
                     Image(systemName: icon)
                         .font(.system(.callout, weight: .semibold))
-                        .foregroundStyle(tint)
+                        .foregroundStyle(iconColor)
                 }
+                .shadow(color: tint.opacity(colorScheme == .dark ? 0.00 : 0.22), radius: 4, x: 0, y: 1)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(.subheadline, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(primaryText)
                     Text(subtitle)
                         .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.64))
+                        .foregroundStyle(secondaryText)
                         .lineLimit(2)
                 }
 
@@ -499,12 +575,25 @@ struct SettingsActionRow: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.36))
+                    .foregroundStyle(secondaryText.opacity(0.68))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.90) : Color(hex: "#0d3142")
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.64) : Color(hex: "#315d72").opacity(0.78)
+    }
+
+    // Light mode: white glyph on solid tile; dark mode: bright glyph on faint circle.
+    private var iconColor: Color {
+        colorScheme == .dark ? tint : .white
     }
 }
 

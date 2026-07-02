@@ -192,6 +192,7 @@ struct StatTileView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
+                .accessibilityLabel("\(label): \(value)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
@@ -199,6 +200,7 @@ struct StatTileView: View {
         .background(Color.black.opacity(0.08))
         .background(.white.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
         .alert(infoTitle ?? label, isPresented: $showInfo) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -254,10 +256,10 @@ struct NetatmoStationPanelView: View {
                                         .lineLimit(1)
                                 }
                                 .font(.system(.caption, weight: .bold))
-                                .foregroundStyle(selectedIndex == index ? Color(hex: "#5b3b00") : .white.opacity(0.82))
+                                .foregroundStyle(selectedIndex == index ? AppColors.selectionText : .white.opacity(0.82))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 7)
-                                .background(selectedIndex == index ? Color(hex: "#ffd166") : Color.white.opacity(0.12))
+                                .background(selectedIndex == index ? AppColors.selection : Color.white.opacity(0.12))
                                 .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)

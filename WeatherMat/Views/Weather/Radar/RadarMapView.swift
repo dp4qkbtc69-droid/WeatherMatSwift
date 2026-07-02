@@ -333,7 +333,7 @@ struct RadarV2MapView: UIViewRepresentable {
             previousTileRenderer = nil
 
             CATransaction.begin()
-            CATransaction.setAnimationDuration(0.18)
+            CATransaction.setAnimationDuration(DesignTokens.Motion.radarCrossfade)
             CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
             oldRenderer?.alpha = 0
             nextRenderer.alpha = 0.84

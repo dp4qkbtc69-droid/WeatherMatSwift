@@ -78,12 +78,12 @@ struct DailyView: View {
                 } label: {
                     Text("\(available) Tage")
                         .font(.system(.subheadline, weight: .bold))
-                        .foregroundStyle(dayRange == range ? Color(hex: "#5b3b00") : .white.opacity(0.84))
+                        .foregroundStyle(dayRange == range ? AppColors.selectionText : .white.opacity(0.84))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(
                             dayRange == range
-                                ? Color(hex: "#ffd166")
+                                ? AppColors.selection
                                 : Color.clear
                         )
                         .clipShape(Capsule())
@@ -133,7 +133,7 @@ struct DailyRowView: View {
         HStack(spacing: 8) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                 .font(.system(.callout, weight: .semibold))
-                .foregroundStyle(isSelected ? Color(hex: "#ffd166") : Color.white.opacity(0.28))
+                .foregroundStyle(isSelected ? AppColors.selection : Color.white.opacity(0.28))
                 .frame(width: 17)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -200,13 +200,21 @@ struct DailyRowView: View {
         .overlay(alignment: .leading) {
             if isSelected {
                 Capsule()
-                    .fill(Color(hex: "#ffd166"))
+                    .fill(AppColors.selection)
                     .frame(width: 4)
                     .padding(.vertical, 10)
             }
         }
         .contentShape(Rectangle())
         .animation(.easeInOut(duration: 0.15), value: isSelected)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(dayLabel) \(dateLabel), \(day.condition.label), "
+            + "Höchstwert \(day.high) Grad, Tiefstwert \(day.low) Grad, "
+            + "\(day.precipitationProbability) Prozent Niederschlag, Wind bis \(day.windMax) km/h"
+        )
+        .accessibilityValue(isSelected ? "ausgewählt" : "")
+        .accessibilityHint("Tippen für Stundenansicht dieses Tages")
     }
 
     private var windColor: Color {
@@ -246,7 +254,7 @@ struct TempBarView: View {
                 .fill(.white.opacity(0.15))
             Capsule()
                 .fill(LinearGradient(
-                    colors: [Color(hex: "#5cc8ff"), Color(hex: "#ffd166")],
+                    colors: [Color(hex: "#5cc8ff"), AppColors.selection],
                     startPoint: .leading, endPoint: .trailing
                 ))
                 .frame(width: max(4, endX - startX))

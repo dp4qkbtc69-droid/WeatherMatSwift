@@ -21,6 +21,7 @@ struct RadarTimelineControl: View {
     let kindLabel: String
     var isBuffering = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var activeBucketIndex = 0
     private let buckets: [DayBucket]
     private var maxIndex: Int { max(frames.count - 1, 0) }
@@ -67,10 +68,10 @@ struct RadarTimelineControl: View {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(.footnote, weight: .bold))
                         .foregroundStyle(AppColors.selection)
-                        .frame(width: 34, height: 34)
-                        .background(Color.white.opacity(0.10))
+                        .frame(width: DesignTokens.Control.compactCircle, height: DesignTokens.Control.compactCircle)
+                        .background(AppColors.Surface.quietAction)
                         .clipShape(Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                        .overlay(Circle().stroke(AppColors.Stroke.control, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPlaying ? "Wiedergabe pausieren" : "Wiedergabe starten")
@@ -84,7 +85,7 @@ struct RadarTimelineControl: View {
                                     // the animation doesn't immediately run off the
                                     // freshly selected (and possibly unwarmed) frame.
                                     isPlaying = false
-                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                    withAnimation(radarAnimation(.quick)) {
                                         activeBucketIndex = index
                                     }
                                     if !bucket.contains(selectedIndex) {
@@ -96,7 +97,7 @@ struct RadarTimelineControl: View {
                                         .foregroundStyle(index == activeBucketIndex ? AppColors.selectionText : .white.opacity(0.92))
                                         .padding(.horizontal, 11)
                                         .padding(.vertical, 6)
-                                        .background(index == activeBucketIndex ? AppColors.selection : Color.white.opacity(0.12))
+                                        .background(index == activeBucketIndex ? AppColors.selection : AppColors.Surface.selectedMuted)
                                         .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
@@ -119,17 +120,9 @@ struct RadarTimelineControl: View {
                         .transition(.opacity)
                 }
 
-                // Radar → Vorhersage reads as a gentle mode change.
-                Text(kindLabel)
-                    .font(.system(.caption2, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(1)
-                    .fixedSize()
-                    .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.25), value: kindLabel)
             }
             .foregroundStyle(.white)
-            .animation(.easeInOut(duration: 0.2), value: isBuffering)
+            .animation(radarAnimation(.standard), value: isBuffering)
 
             GeometryReader { proxy in
                 let width = max(1, proxy.size.width)
@@ -139,6 +132,15 @@ struct RadarTimelineControl: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.18)).frame(height: 5).padding(.horizontal, 12).offset(y: 16)
                     Capsule().fill(.white.opacity(0.65)).frame(width: max(8, knobX), height: 5).padding(.leading, 12).offset(y: 16)
+
+                    Text(kindLabel)
+                        .font(.system(.caption2, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .contentTransition(.opacity)
+                        .animation(radarAnimation(.standard), value: kindLabel)
+                        .position(x: max(42, width - 46), y: 4)
 
                     // Precise forecast boundary: hairline + small plain label,
                     // no floating pill.
@@ -176,7 +178,7 @@ struct RadarTimelineControl: View {
 
                     Circle()
                         .fill(AppColors.selection)
-                        .frame(width: 16, height: 16)
+                        .frame(width: DesignTokens.Control.timelineKnob, height: DesignTokens.Control.timelineKnob)
                         .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
                         .position(x: knobX, y: 18)
                 }
@@ -204,20 +206,29 @@ struct RadarTimelineControl: View {
             }
         }
         .padding(8)
-        .background(Color.black.opacity(0.45))
-        .background(.ultraThinMaterial.opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignTokens.radiusSmall)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        )
+        .instrumentPanel()
         .onChange(of: selectedIndex) { _, newValue in
             let bucket = buckets.firstIndex(where: { $0.contains(newValue) }) ?? 0
             if bucket != activeBucketIndex {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(radarAnimation(.quick)) {
                     activeBucketIndex = bucket
                 }
             }
+        }
+    }
+
+    private enum TimelineAnimationKind {
+        case quick
+        case standard
+    }
+
+    private func radarAnimation(_ kind: TimelineAnimationKind) -> Animation? {
+        guard !reduceMotion else { return nil }
+        switch kind {
+        case .quick:
+            return .easeInOut(duration: DesignTokens.Motion.quick)
+        case .standard:
+            return .easeInOut(duration: DesignTokens.Motion.standard)
         }
     }
 
