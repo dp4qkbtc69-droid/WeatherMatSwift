@@ -9,6 +9,9 @@ final class RadarV2Store {
     var selectedIndex = 0
     var isPlaying = false
     var isLoading = false
+    /// True while playback is holding for an unready frame — the timeline
+    /// shows a subtle readiness indicator instead of jumping to empty tiles.
+    var isBuffering = false
     var errorMessage: String?
     private var cachedVisibleFrames: [RainRadarFrame] = []
 

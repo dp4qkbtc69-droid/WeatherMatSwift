@@ -19,6 +19,7 @@ struct RadarTimelineControl: View {
     let selectedTimeLabel: String
     let selectedDateLabel: String
     let kindLabel: String
+    var isBuffering = false
 
     @State private var activeBucketIndex = 0
     private let buckets: [DayBucket]
@@ -30,7 +31,8 @@ struct RadarTimelineControl: View {
         isPlaying: Binding<Bool>,
         selectedTimeLabel: String,
         selectedDateLabel: String,
-        kindLabel: String
+        kindLabel: String,
+        isBuffering: Bool = false
     ) {
         self.frames = frames
         _selectedIndex = selectedIndex
@@ -38,6 +40,7 @@ struct RadarTimelineControl: View {
         self.selectedTimeLabel = selectedTimeLabel
         self.selectedDateLabel = selectedDateLabel
         self.kindLabel = kindLabel
+        self.isBuffering = isBuffering
         buckets = Self.makeBuckets(frames)
     }
 
@@ -107,13 +110,26 @@ struct RadarTimelineControl: View {
                     Spacer()
                 }
 
+                // Subtle readiness indicator while playback holds for a frame
+                // ("Loading/Buffering" state — no big spinner on the map).
+                if isBuffering {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white.opacity(0.7))
+                        .transition(.opacity)
+                }
+
+                // Radar → Vorhersage reads as a gentle mode change.
                 Text(kindLabel)
                     .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(1)
                     .fixedSize()
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.25), value: kindLabel)
             }
             .foregroundStyle(.white)
+            .animation(.easeInOut(duration: 0.2), value: isBuffering)
 
             GeometryReader { proxy in
                 let width = max(1, proxy.size.width)

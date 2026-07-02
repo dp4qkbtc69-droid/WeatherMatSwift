@@ -39,8 +39,12 @@ actor RadarTileReadinessCenter {
         readyFrameIDs.contains(frameID)
     }
 
-    func waitUntilReady(_ frameID: String, timeoutNanoseconds: UInt64) async {
-        if readyFrameIDs.contains(frameID) { return }
+    /// Waits until the frame's tiles are prefetched. Returns true when ready,
+    /// false when the timeout elapsed first — callers can then decide to
+    /// stall further instead of advancing onto empty tiles.
+    @discardableResult
+    func waitUntilReady(_ frameID: String, timeoutNanoseconds: UInt64) async -> Bool {
+        if readyFrameIDs.contains(frameID) { return true }
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
                 await withCheckedContinuation { continuation in
@@ -55,6 +59,7 @@ actor RadarTileReadinessCenter {
             await group.next()
             group.cancelAll()
         }
+        return readyFrameIDs.contains(frameID)
     }
 
     private func storeContinuation(_ continuation: CheckedContinuation<Void, Never>, for frameID: String) {
@@ -86,6 +91,9 @@ struct RadarV2MapView: UIViewRepresentable {
     let timelineFrame: RainRadarFrame?
     let isPlaying: Bool
     let userCoordinate: CLLocationCoordinate2D?
+    /// Fired on tap/pan/zoom — the screen uses this to bring back
+    /// auto-hidden chrome.
+    var onUserInteraction: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -95,13 +103,18 @@ struct RadarV2MapView: UIViewRepresentable {
         let mapView = MKMapView()
         mapView.delegate = context.coordinator
         mapView.mapType = .mutedStandard
-        // Instrument mode: dark base map so the light precipitation blues keep
-        // figure-ground contrast; POIs off — the radar is the content here.
-        mapView.overrideUserInterfaceStyle = .dark
+        // Light base following the app theme (a dark base was tried and
+        // rejected — colors read worse and the break from the main screen was
+        // too hard). POIs stay off: the radar is the content here.
         mapView.pointOfInterestFilter = .excludingAll
         mapView.showsCompass = false
         mapView.showsScale = false
         mapView.setRegion(region, animated: false)
+        // Tap recognizer so the screen can bring back auto-hidden chrome;
+        // works alongside MapKit's own gestures.
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleMapTap))
+        tap.delegate = context.coordinator
+        mapView.addGestureRecognizer(tap)
         context.coordinator.lastAppliedRegionRevision = regionRevision
         return mapView
     }
@@ -113,12 +126,31 @@ struct RadarV2MapView: UIViewRepresentable {
             context.coordinator.lastAppliedRegionRevision = regionRevision
         }
 
+        context.coordinator.onUserInteraction = onUserInteraction
         context.coordinator.update(request, in: mapView)
         context.coordinator.sync(layerIDs: enabledLayers, timelineFrame: timelineFrame, isPlaying: isPlaying, in: mapView)
         context.coordinator.syncUserAnnotation(userCoordinate, in: mapView)
     }
 
-    final class Coordinator: NSObject, MKMapViewDelegate {
+    final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
+        var onUserInteraction: (() -> Void)?
+
+        @objc func handleMapTap() {
+            onUserInteraction?()
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+            // Pan/zoom counts as interaction — bring chrome back.
+            onUserInteraction?()
+        }
+
         private var request: RadarV2RenderRequest?
         private var activeTileOverlay: RadarV2TileOverlay?
         private var activeTileOverlayKey: String?

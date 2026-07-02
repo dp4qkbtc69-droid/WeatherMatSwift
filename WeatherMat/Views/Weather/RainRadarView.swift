@@ -82,6 +82,10 @@ struct RainRadarScreen: View {
     @State private var enabledLayers = Set<DwdWMSLayer>()
     @State private var showsLegend = false
     @State private var noticeText: String?
+    // Chrome visibility state: header + rail hide after inactivity during
+    // playback; the timeline stays as a semi-transparent anchor.
+    @State private var chromeHidden = false
+    @State private var chromeHideTask: Task<Void, Never>?
 
     private var userCoordinate: CLLocationCoordinate2D? {
         guard let location else { return nil }
@@ -97,20 +101,15 @@ struct RainRadarScreen: View {
                 enabledLayers: enabledLayers,
                 timelineFrame: store.selectedFrame,
                 isPlaying: store.isPlaying,
-                userCoordinate: userCoordinate
+                userCoordinate: userCoordinate,
+                onUserInteraction: { registerInteraction() }
             )
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 header
-                Spacer()
-                if store.isLoading {
-                    ProgressView()
-                        .tint(.white)
-                        .padding(14)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                }
+                    .opacity(chromeHidden ? 0 : 1)
+                    .allowsHitTesting(!chromeHidden)
                 Spacer()
                 // Legend docks directly above the timeline instead of
                 // floating over the map.
@@ -123,6 +122,7 @@ struct RainRadarScreen: View {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 showsLegend = false
                             }
+                            registerInteraction()
                         }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -130,11 +130,14 @@ struct RainRadarScreen: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
+                .opacity(chromeHidden ? 0.72 : 1)
             }
 
             controls
                 .padding(.top, 58)
                 .padding(.trailing, 12)
+                .opacity(chromeHidden ? 0 : 1)
+                .allowsHitTesting(!chromeHidden)
 
             if let noticeText {
                 Text(noticeText)
@@ -161,16 +164,77 @@ struct RainRadarScreen: View {
                 try? await Task.sleep(nanoseconds: store.nextPlaybackDelayNanoseconds)
                 guard !Task.isCancelled else { return }
                 if let nextFrame = store.nextPlaybackFrame {
-                    // Wait until the next frame's tiles are warmed. Returns
-                    // immediately once ready; the timeout only caps how long we
-                    // hold for slow follow-up-day frames before advancing.
-                    await RadarTileReadinessCenter.shared.waitUntilReady(nextFrame.id, timeoutNanoseconds: 1_200_000_000)
+                    // Motion spec: hold/stall on unready frames rather than
+                    // jumping to empty tiles. First a quiet wait, then a
+                    // visible buffering hold, then advance regardless so a
+                    // broken frame can never freeze playback entirely.
+                    let ready = await RadarTileReadinessCenter.shared.waitUntilReady(
+                        nextFrame.id, timeoutNanoseconds: 1_200_000_000
+                    )
+                    if !ready, !Task.isCancelled, store.isPlaying {
+                        store.isBuffering = true
+                        await RadarTileReadinessCenter.shared.waitUntilReady(
+                            nextFrame.id, timeoutNanoseconds: 1_800_000_000
+                        )
+                        store.isBuffering = false
+                    }
                 }
                 guard !Task.isCancelled else { return }
                 store.advance()
             }
+            store.isBuffering = false
+        }
+        .onChange(of: store.isPlaying) { _, playing in
+            if playing {
+                scheduleChromeHide()
+            } else {
+                showChrome()
+            }
+        }
+        .onChange(of: showsLegend) { _, open in
+            // Legend keeps chrome visible while open.
+            if open { showChrome() }
+        }
+        .onDisappear {
+            chromeHideTask?.cancel()
         }
         .statusBarHidden(false)
+    }
+
+    // MARK: - Chrome visibility states
+    // Playback mode: map maximal, chrome reduced after 3 s inactivity.
+    // Inspect mode: any tap/pan/zoom brings everything back.
+    // Legend/error/loading: no auto-hide.
+
+    private func registerInteraction() {
+        showChrome()
+    }
+
+    private func showChrome() {
+        chromeHideTask?.cancel()
+        if chromeHidden {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                chromeHidden = false
+            }
+        }
+        if store.isPlaying {
+            scheduleChromeHide()
+        }
+    }
+
+    private func scheduleChromeHide() {
+        chromeHideTask?.cancel()
+        chromeHideTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            guard store.isPlaying,
+                  !showsLegend,
+                  store.errorMessage == nil,
+                  !store.isLoading else { return }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                chromeHidden = true
+            }
+        }
     }
 
     // Single-line instrument header: back · title/location · time.
@@ -248,6 +312,8 @@ struct RainRadarScreen: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+        // Rail taps count as interaction — keeps chrome visible during playback.
+        .simultaneousGesture(TapGesture().onEnded { registerInteraction() })
     }
 
     @ViewBuilder
@@ -291,17 +357,25 @@ struct RainRadarScreen: View {
                 ),
                 selectedTimeLabel: store.selectedTimeLabel,
                 selectedDateLabel: store.selectedDateLabel,
-                kindLabel: store.selectedFrameKindLabel
+                kindLabel: store.selectedFrameKindLabel,
+                isBuffering: store.isBuffering
             )
         } else {
-            Text("Lade Radar…")
-                .font(.system(.footnote, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-                .padding(12)
-                .frame(maxWidth: .infinity)
-                .background(Color.black.opacity(0.45))
-                .background(.ultraThinMaterial.opacity(0.7))
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
+            // Loading state lives in the timeline slot — no big spinner
+            // covering the map.
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white.opacity(0.8))
+                Text("Lade Radar…")
+                    .font(.system(.footnote, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(Color.black.opacity(0.45))
+            .background(.ultraThinMaterial.opacity(0.7))
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusSmall))
         }
     }
 
