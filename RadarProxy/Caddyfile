@@ -1,3 +1,8 @@
+# HTTP/3 (QUIC) is enabled and must be reachable end to end: UDP 443 is
+# published to this container (docker-compose) and opened in the firewall
+# (ufw allow 443/udp). iOS caches HTTP/3 availability, so QUIC has to work
+# rather than be silently dropped — a dropped UDP 443 stalls the app for
+# seconds before it falls back to TCP.
 {$RADAR_DOMAIN} {
 	encode zstd gzip
 

@@ -70,6 +70,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # HTTP/3 (QUIC) — iOS prefers it and caches its availability, so it
+      # must be forwarded, not dropped, or the app stalls before TCP fallback.
+      - "443:443/udp"
     logging:
       driver: json-file
       options:
