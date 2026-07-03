@@ -54,6 +54,19 @@ final class RadarV2Store {
 
     // User-facing wording: "Radar" (observation) vs. "Vorhersage" (forecast).
     // Model names (ICON-EU, DWD RV) stay in the legend as provenance only.
+    /// Compact "when" for the persistent time anchor shown while the chrome
+    /// is auto-hidden during playback, e.g. "Heute 14:00", "Morgen 09:00",
+    /// "Sa. 14:00".
+    var compactWhenLabel: String {
+        guard let selectedFrame else { return "--:--" }
+        let time = selectedFrame.time.formatted(.dateTime.hour().minute().locale(.init(identifier: "de_DE")))
+        let calendar = Calendar.current
+        if calendar.isDateInToday(selectedFrame.time) { return "Heute \(time)" }
+        if calendar.isDateInTomorrow(selectedFrame.time) { return "Morgen \(time)" }
+        let day = selectedFrame.time.formatted(.dateTime.weekday(.abbreviated).locale(.init(identifier: "de_DE")))
+        return "\(day) \(time)"
+    }
+
     var selectedFrameKindLabel: String {
         guard let selectedFrame else { return "Radar" }
         if selectedFrame.precipitationType == .snow {

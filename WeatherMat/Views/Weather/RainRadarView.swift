@@ -140,6 +140,27 @@ struct RainRadarScreen: View {
                 .opacity(chromeHidden ? 0 : 1)
                 .allowsHitTesting(!chromeHidden)
 
+            // Persistent time anchor: appears exactly when the header hides
+            // during playback, so you always know which time is on screen.
+            // Its own glass keeps it legible over any part of the map; taps
+            // pass through so touching it still brings the chrome back.
+            if chromeHidden {
+                Text(store.compactWhenLabel)
+                    .font(.system(.footnote, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.45))
+                    .background(.ultraThinMaterial.opacity(0.7))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 10)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
             if let noticeText {
                 Text(noticeText)
                     .font(.system(.footnote, weight: .semibold))
