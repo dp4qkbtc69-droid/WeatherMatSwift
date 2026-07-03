@@ -92,7 +92,7 @@ except ValueError:
     TILE_RENDER_SCALE = 2
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
-APP_VERSION = "hybrid-palette-smooth-tiles-2026-07-02"
+APP_VERSION = "smooth-bilinear-warm-2026-07-03"
 
 # Hybrid rain palette: blue for light/moderate rain, warning colors
 # (yellow/orange/red) from "kraeftig" upwards. Must stay in sync with
@@ -709,7 +709,11 @@ def _write_disk_tile(frame_id: str, z: int, x: int, y: int, data: bytes) -> None
         return
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        # Atomic write (temp + rename) so a concurrent reader never sees a
+        # half-written PNG, and multiple workers can't corrupt the same tile.
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
     except OSError as error:
         logger.warning("tile disk cache write failed: %s", error)
 
@@ -1647,7 +1651,10 @@ def _render_tile(image: Image.Image, z: int, x: int, y: int) -> bytes:
     out.alpha_composite(crop, dest=(scaled_target[0], scaled_target[1]))
 
     if scale > 1:
-        out = out.resize((TILE_SIZE, TILE_SIZE), Image.Resampling.LANCZOS)
+        # BILINEAR is visually equivalent to LANCZOS for a 2x->1x downscale of
+        # flat color classes but roughly half the CPU cost — matters because
+        # every uncached tile is rendered on demand.
+        out = out.resize((TILE_SIZE, TILE_SIZE), Image.Resampling.BILINEAR)
 
     buffer = io.BytesIO()
     out.save(buffer, format="PNG", optimize=False, compress_level=1)

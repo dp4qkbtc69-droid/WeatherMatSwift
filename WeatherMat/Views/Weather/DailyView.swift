@@ -172,7 +172,7 @@ struct DailyRowView: View {
                            text: "\(day.windMax)",
                            color: windColor)
             }
-            .frame(width: 48, alignment: .leading)
+            .frame(width: 58, alignment: .leading)
 
             Spacer(minLength: 0)
 
@@ -235,7 +235,8 @@ struct DailyRowView: View {
                 .font(.system(.caption, weight: .bold))
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
+                .minimumScaleFactor(0.7)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .foregroundStyle(color)
     }
