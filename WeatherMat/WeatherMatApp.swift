@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct WeatherMatApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = WeatherViewModel()
     @AppStorage("appTheme") private var themeName: String = AppTheme.system.rawValue
 
@@ -57,6 +58,13 @@ struct WeatherMatApp: App {
                 ) { _ in
                     scheduleBackgroundRefresh()
                 }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Cold start and every foreground return: refresh the active
+            // location and pre-warm its radar tiles — no manual pull-to-refresh.
+            if phase == .active {
+                Task { await vm.refreshOnForeground() }
+            }
         }
         // SwiftUI background task handler (iOS 16+)
         .backgroundTask(.appRefresh("de.praxishartlep.weathermat.refresh")) {

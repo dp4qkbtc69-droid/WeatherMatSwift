@@ -187,6 +187,40 @@ final class WeatherViewModel {
         await loadWeather(for: loc, force: true)
     }
 
+    // MARK: - Foreground refresh + radar prewarm
+    private let foregroundRefreshCooldown: TimeInterval = 120
+    private var lastForegroundRefresh: Date?
+    private let lastWarmedRadarKey = "lastWarmedRadarLocation_v1"
+
+    /// Called when the app becomes active (cold start and foreground return):
+    /// refreshes the active location's weather so no manual pull-to-refresh is
+    /// needed, and pre-warms radar tiles for it in the background.
+    @MainActor
+    func refreshOnForeground() async {
+        guard let loc = activeLocation else { return }
+        prewarmRadarIfNeeded(for: loc)
+        if let last = lastForegroundRefresh,
+           Date().timeIntervalSince(last) < foregroundRefreshCooldown {
+            return
+        }
+        lastForegroundRefresh = Date()
+        await loadWeather(for: loc, force: true)
+    }
+
+    /// Asks the radar proxy to render this location's tiles ahead of the user
+    /// opening the radar — but only when the active location actually changed
+    /// since the last prewarm (~1 km granularity), so we don't re-trigger the
+    /// server warm on every launch at the same place.
+    @MainActor
+    func prewarmRadarIfNeeded(for loc: SavedLocation) {
+        let coord = String(format: "%.2f,%.2f", loc.latitude, loc.longitude)
+        guard UserDefaults.standard.string(forKey: lastWarmedRadarKey) != coord else { return }
+        UserDefaults.standard.set(coord, forKey: lastWarmedRadarKey)
+        Task.detached(priority: .utility) {
+            await RainRadarService.warmLocation(latitude: loc.latitude, longitude: loc.longitude)
+        }
+    }
+
     // MARK: - Location management
     @MainActor
     func addLocation(_ loc: SavedLocation) {
@@ -256,6 +290,7 @@ final class WeatherViewModel {
             where2GoSpots = []
             where2GoError = nil
             lastWhere2GoRequest = nil
+            prewarmRadarIfNeeded(for: loc)
             Task { await loadWeather(for: loc) }
         }
     }
@@ -323,6 +358,7 @@ final class WeatherViewModel {
             lastGPSFix = Date()
             saveLocations()
             saveActiveLocationIndex()
+            prewarmRadarIfNeeded(for: saved)
             await loadWeather(for: saved, force: true)
         } catch {
             isLoading = false
