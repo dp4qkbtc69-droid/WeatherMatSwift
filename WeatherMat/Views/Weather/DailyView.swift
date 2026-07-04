@@ -148,6 +148,7 @@ struct DailyRowView: View {
                     .foregroundStyle(.white.opacity(0.62))
                     .monospacedDigit()
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .frame(width: 52, alignment: .leading)
 
@@ -181,6 +182,8 @@ struct DailyRowView: View {
                     .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.76))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
                     .frame(width: 30, alignment: .trailing)
 
                 TempBarView(low: day.low, high: day.high,
@@ -191,6 +194,8 @@ struct DailyRowView: View {
                     .font(.system(.headline, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
                     .frame(width: 30, alignment: .leading)
             }
         }
