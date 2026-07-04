@@ -191,6 +191,13 @@ final class WeatherViewModel {
     private let foregroundRefreshCooldown: TimeInterval = 120
     private var lastForegroundRefresh: Date?
     private let lastWarmedRadarKey = "lastWarmedRadarLocation_v1"
+    private let lastWarmedRadarAtKey = "lastWarmedRadarAt_v1"
+    /// Re-warm the same location after this long even if it didn't move: the
+    /// server keeps dynamic hotspots only in memory, so a proxy restart (deploy,
+    /// monthly rebuild, OOM) drops them. Re-warming on a long-absence return
+    /// reheats the server hotspot *and* the app's QUIC connection before the
+    /// first tile batch.
+    private let radarWarmCooldown: TimeInterval = 15 * 60
 
     /// Called when the app becomes active (cold start and foreground return):
     /// refreshes the active location's weather so no manual pull-to-refresh is
@@ -208,14 +215,20 @@ final class WeatherViewModel {
     }
 
     /// Asks the radar proxy to render this location's tiles ahead of the user
-    /// opening the radar — but only when the active location actually changed
-    /// since the last prewarm (~1 km granularity), so we don't re-trigger the
-    /// server warm on every launch at the same place.
+    /// opening the radar. Re-triggers when the active location changed (~1 km
+    /// granularity) *or* when the last warm is older than `radarWarmCooldown`,
+    /// so a returning user after a long absence re-primes the server hotspot and
+    /// the network connection instead of hitting cold tiles.
     @MainActor
     func prewarmRadarIfNeeded(for loc: SavedLocation) {
         let coord = String(format: "%.2f,%.2f", loc.latitude, loc.longitude)
-        guard UserDefaults.standard.string(forKey: lastWarmedRadarKey) != coord else { return }
-        UserDefaults.standard.set(coord, forKey: lastWarmedRadarKey)
+        let defaults = UserDefaults.standard
+        let sameCoord = defaults.string(forKey: lastWarmedRadarKey) == coord
+        let lastAt = defaults.object(forKey: lastWarmedRadarAtKey) as? Date
+        let fresh = lastAt.map { Date().timeIntervalSince($0) < radarWarmCooldown } ?? false
+        guard !(sameCoord && fresh) else { return }
+        defaults.set(coord, forKey: lastWarmedRadarKey)
+        defaults.set(Date(), forKey: lastWarmedRadarAtKey)
         Task.detached(priority: .utility) {
             await RainRadarService.warmLocation(latitude: loc.latitude, longitude: loc.longitude)
         }

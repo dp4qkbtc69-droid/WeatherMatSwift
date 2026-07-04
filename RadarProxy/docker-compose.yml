@@ -42,6 +42,9 @@ services:
       APNS_USE_SANDBOX: "${APNS_USE_SANDBOX:-false}"
       APNS_MIN_SEVERITY: "${APNS_MIN_SEVERITY:-Moderate}"
       PUSH_STATE_PATH: "/data/push_state.json"
+      # Persist dynamic hotspots on the same volume so user-warmed locations
+      # survive a container restart (deploy, monthly rebuild, OOM).
+      HOTSPOTS_STATE_PATH: "/data/hotspots.json"
     volumes:
       - ./apns:/apns:ro
       - push_data:/data

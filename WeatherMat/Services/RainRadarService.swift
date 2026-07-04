@@ -65,9 +65,12 @@ enum RainRadarService {
     }
 
     static func loadCachedTimeline() -> RainRadarTimeline? {
+        // 30-min window: the cached timeline already carries forecast frames, so
+        // it renders instantly on a long-absence return while load() kicks off a
+        // background refresh to pull in newer observations.
         guard let data = UserDefaults.standard.data(forKey: timelineCacheKey),
               let cache = try? JSONDecoder().decode(CachedRadarTimeline.self, from: data),
-              Date().timeIntervalSince(cache.savedAt) < 10 * 60 else { return nil }
+              Date().timeIntervalSince(cache.savedAt) < 30 * 60 else { return nil }
         return cache.toTimeline()
     }
 
@@ -106,10 +109,12 @@ enum RainRadarService {
 
     private static func fetchDwdTimeline(baseURL: URL) async throws -> RainRadarTimeline {
         let timelineURL = baseURL.appending(path: "timeline.json")
-        // Short timeout so a hung/slow proxy surfaces as a retryable error
-        // quickly instead of holding the "loading" state for the 60 s default.
+        // Bounded timeout so a hung proxy surfaces as a retryable error instead
+        // of holding "loading" for the 60 s default — but long enough to ride
+        // out a cold cache rebuild on the proxy (~15 s after a restart), so we
+        // don't needlessly fall back to RainViewer right after a redeploy.
         var request = authenticatedDwdRadarRequest(timelineURL)
-        request.timeoutInterval = 12
+        request.timeoutInterval = 20
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw URLError(.badServerResponse)

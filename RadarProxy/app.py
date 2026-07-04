@@ -115,6 +115,7 @@ APNS_USE_SANDBOX = os.environ.get("APNS_USE_SANDBOX", "true").lower() in {"1", "
 APNS_MIN_SEVERITY = os.environ.get("APNS_MIN_SEVERITY", "Moderate")
 WARNING_POLL_SECONDS = int(os.environ.get("WARNING_POLL_SECONDS", "300"))
 PUSH_STATE_PATH = Path(os.environ.get("PUSH_STATE_PATH", "push_state.json"))
+HOTSPOTS_STATE_PATH = Path(os.environ.get("HOTSPOTS_STATE_PATH", "hotspots.json"))
 _SEVERITY_RANK = {"Minor": 0, "Moderate": 1, "Severe": 2, "Extreme": 3}
 TILE_CACHE_VERSION = os.environ.get("RADAR_TILE_CACHE_VERSION", APP_VERSION)
 WEB_MERCATOR_LIMIT = 20037508.342789244
@@ -174,6 +175,7 @@ _warm_stats = {
 }
 _dynamic_hotspots: List[Tuple[float, float]] = []
 _dynamic_hotspots_lock = threading.Lock()
+_dynamic_hotspots_loaded = False
 _icon_raw_cache_lock = threading.Lock()
 _icon_raw_cache: Dict[str, Any] = {
     "referenceTime": None,
@@ -210,6 +212,7 @@ _transparent_tile: bytes | None = None
 
 @app.on_event("startup")
 def startup() -> None:
+    _load_dynamic_hotspots()
     _start_refresh_loop()
     _start_warning_poll()
 
@@ -333,6 +336,7 @@ def warm_location(request: Request, lat: float, lon: float) -> dict:
         _dynamic_hotspots[:] = [item for item in _dynamic_hotspots if item != point]
         _dynamic_hotspots.insert(0, point)
         del _dynamic_hotspots[8:]
+    _save_dynamic_hotspots()
     cache = _ensure_cache()
     scheduled = _schedule_tile_warm(cache, force=True)
     return {
@@ -408,6 +412,39 @@ def _save_push_state() -> None:
         PUSH_STATE_PATH.write_text(json.dumps(_push_state))
     except OSError as error:
         logger.warning("push state write failed: %s", error)
+
+
+def _load_dynamic_hotspots() -> None:
+    # Dynamic hotspots live in memory, so a container restart (deploy, monthly
+    # rebuild, OOM) would drop every user's warmed location. Persist them so the
+    # proxy keeps warming detail zooms across restarts even before the app
+    # re-registers the location.
+    global _dynamic_hotspots_loaded
+    if _dynamic_hotspots_loaded:
+        return
+    _dynamic_hotspots_loaded = True
+    try:
+        if HOTSPOTS_STATE_PATH.exists():
+            data = json.loads(HOTSPOTS_STATE_PATH.read_text())
+            if isinstance(data, list):
+                points = [
+                    (round(float(item["lat"]), 4), round(float(item["lon"]), 4))
+                    for item in data
+                    if isinstance(item, dict) and "lat" in item and "lon" in item
+                ]
+                with _dynamic_hotspots_lock:
+                    _dynamic_hotspots[:] = points[:8]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        logger.warning("hotspots state unreadable, starting fresh: %s", error)
+
+
+def _save_dynamic_hotspots() -> None:
+    with _dynamic_hotspots_lock:
+        payload = [{"lat": lat, "lon": lon} for lat, lon in _dynamic_hotspots]
+    try:
+        HOTSPOTS_STATE_PATH.write_text(json.dumps(payload))
+    except OSError as error:
+        logger.warning("hotspots state write failed: %s", error)
 
 
 @app.post("/push/register")
