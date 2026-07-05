@@ -206,6 +206,22 @@ enum RainRadarService {
         _ = try? await URLSession.shared.data(for: request)
     }
 
+    /// Registers all saved locations as warm hotspots in one call, so every one
+    /// of them opens the radar from cache — not just the active location.
+    static func registerWarmLocations(_ coordinates: [(latitude: Double, longitude: Double)]) async {
+        guard let baseURL = localDwdRadarBaseURL, !coordinates.isEmpty else { return }
+        var request = authenticatedDwdRadarRequest(baseURL.appending(path: "warm-locations"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+        let body: [String: Any] = [
+            "locations": coordinates.map { ["lat": $0.latitude, "lon": $0.longitude] }
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        request.httpBody = data
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
     private static var localDwdRadarToken: String? {
         let rawValue = localConfig?.dwdRadarTileToken.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return rawValue.isEmpty ? nil : rawValue

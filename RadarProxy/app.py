@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
-from PIL import Image
+from PIL import Image, ImageFilter
 from pydantic import BaseModel, Field
 
 
@@ -93,6 +93,9 @@ HOTSPOT_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_ZO
 HOTSPOT_DETAIL_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_ZOOMS", "7,8,9").split(",") if item.strip())
 HOTSPOT_DETAIL_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT", "96"))
 HOTSPOT_DETAIL_HALF_KM = float(os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_HALF_KM", "75"))
+# How many user locations to keep warm. The app registers all its saved
+# locations, so this caps how many open the radar instantly.
+DYNAMIC_HOTSPOTS_MAX = int(os.environ.get("DWD_RADAR_DYNAMIC_HOTSPOTS_MAX", "16"))
 RADAR_PROXY_TOKEN = os.environ.get("RADAR_PROXY_TOKEN") or os.environ.get("WEATHERMAT_RADAR_TOKEN") or ""
 DISK_CACHE_DIR = Path(os.environ["RADAR_DISK_CACHE_DIR"]) if os.environ.get("RADAR_DISK_CACHE_DIR") else None
 TILE_SIZE = 512
@@ -115,6 +118,43 @@ RAIN_COLOR_STEPS = (
     (4.0, 8.0, (242, 140, 40, 220)),
     (8.0, 9999.0, (217, 48, 37, 238)),
 )
+SNOW_COLOR_STEPS = (
+    (0.01, 0.5, (255, 255, 255, 145)),
+    (0.5, 2.0, (220, 238, 255, 180)),
+    (2.0, 9999.0, (186, 206, 255, 220)),
+)
+
+# Optics: interpolate a continuous colour ramp over the step anchors (same
+# threshold colours → the app legend stays valid) instead of 6 hard bands, and
+# feather precipitation edges. Both are applied once per frame at master
+# resolution, so cost is negligible. Env-gated so they can be tuned/reverted.
+SMOOTH_PALETTE = os.environ.get("DWD_RADAR_SMOOTH_PALETTE", "true").lower() in {"1", "true", "yes"}
+FEATHER_RADIUS = float(os.environ.get("DWD_RADAR_FEATHER_RADIUS", "0.8"))
+_RAIN_ANCHOR_I = np.array([step[0] for step in RAIN_COLOR_STEPS], dtype=np.float32)
+_RAIN_ANCHOR_C = np.array([step[2] for step in RAIN_COLOR_STEPS], dtype=np.float32)
+_SNOW_ANCHOR_I = np.array([step[0] for step in SNOW_COLOR_STEPS], dtype=np.float32)
+_SNOW_ANCHOR_C = np.array([step[2] for step in SNOW_COLOR_STEPS], dtype=np.float32)
+
+
+def _ramp_rgba(field: "np.ndarray", anchor_i: "np.ndarray", anchor_c: "np.ndarray") -> "np.ndarray":
+    """Continuous RGBA ramp: interpolate each channel over the anchor colours
+    by intensity. Pixels below the first anchor are fully transparent."""
+    flat = field.reshape(-1).astype(np.float32)
+    rgba = np.empty((flat.size, 4), dtype=np.float32)
+    for channel in range(4):
+        rgba[:, channel] = np.interp(flat, anchor_i, anchor_c[:, channel])
+    rgba[flat < anchor_i[0], 3] = 0.0
+    return rgba.reshape(field.shape + (4,)).astype(np.uint8)
+
+
+def _feather(image: "Image.Image") -> "Image.Image":
+    """Soften precipitation-area edges by blurring only the alpha channel, so
+    colours stay crisp while area boundaries fade naturally."""
+    if FEATHER_RADIUS <= 0:
+        return image
+    r, g, b, a = image.split()
+    a = a.filter(ImageFilter.GaussianBlur(FEATHER_RADIUS))
+    return Image.merge("RGBA", (r, g, b, a))
 
 # --- DWD warning push (APNs) ---
 APNS_TEAM_ID = os.environ.get("APNS_TEAM_ID", "")
@@ -335,6 +375,42 @@ def warm(request: Request) -> dict:
     }
 
 
+class WarmPoint(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+class WarmLocationsRequest(BaseModel):
+    locations: List[WarmPoint]
+
+
+@app.post("/warm-locations")
+def warm_locations(request: Request, payload: WarmLocationsRequest) -> dict:
+    """Register the app's full set of saved locations as hotspots in one call
+    (replacing the list), then warm once — so every saved location opens the
+    radar from cache, not just the active one."""
+    _require_token(request)
+    points: List[Tuple[float, float]] = []
+    seen: set = set()
+    for loc in payload.locations:
+        point = (round(loc.lat, 4), round(loc.lon, 4))
+        if point in seen:
+            continue
+        seen.add(point)
+        points.append(point)
+    with _dynamic_hotspots_lock:
+        _dynamic_hotspots[:] = points[:DYNAMIC_HOTSPOTS_MAX]
+    _save_dynamic_hotspots()
+    cache = _ensure_cache()
+    scheduled = _schedule_tile_warm(cache, force=True)
+    return {
+        "ok": True,
+        "scheduled": scheduled,
+        "hotspots": _dynamic_hotspots_snapshot(),
+        "warmStats": _warm_stats,
+    }
+
+
 @app.post("/warm-location")
 @app.get("/warm-location")
 def warm_location(request: Request, lat: float, lon: float) -> dict:
@@ -345,7 +421,7 @@ def warm_location(request: Request, lat: float, lon: float) -> dict:
         point = (round(lat, 4), round(lon, 4))
         _dynamic_hotspots[:] = [item for item in _dynamic_hotspots if item != point]
         _dynamic_hotspots.insert(0, point)
-        del _dynamic_hotspots[8:]
+        del _dynamic_hotspots[DYNAMIC_HOTSPOTS_MAX:]
     _save_dynamic_hotspots()
     cache = _ensure_cache()
     scheduled = _schedule_tile_warm(cache, force=True)
@@ -443,7 +519,7 @@ def _load_dynamic_hotspots() -> None:
                     if isinstance(item, dict) and "lat" in item and "lon" in item
                 ]
                 with _dynamic_hotspots_lock:
-                    _dynamic_hotspots[:] = points[:8]
+                    _dynamic_hotspots[:] = points[:DYNAMIC_HOTSPOTS_MAX]
     except (OSError, ValueError, KeyError, TypeError) as error:
         logger.warning("hotspots state unreadable, starting fresh: %s", error)
 
@@ -1364,14 +1440,20 @@ def _crop_regular_lat_lon(values: np.ndarray, first_lat: float, last_lat: float,
 
 def _render_icon_raw_image(intensity: np.ndarray, snow_intensity: np.ndarray) -> Image.Image:
     rain = np.maximum(intensity - snow_intensity, 0.0)
-    rgba = np.zeros((intensity.shape[0], intensity.shape[1], 4), dtype=np.uint8)
-    for lower, upper, color in RAIN_COLOR_STEPS:
-        _paint_range(rgba, rain, lower, upper, color)
-    _paint_range(rgba, snow_intensity, 0.01, 0.5, (255, 255, 255, 145))
-    _paint_range(rgba, snow_intensity, 0.5, 2.0, (220, 238, 255, 180))
-    _paint_range(rgba, snow_intensity, 2.0, 9999.0, (186, 206, 255, 220))
+    if SMOOTH_PALETTE:
+        rgba = _ramp_rgba(rain, _RAIN_ANCHOR_I, _RAIN_ANCHOR_C)
+        snow_rgba = _ramp_rgba(snow_intensity, _SNOW_ANCHOR_I, _SNOW_ANCHOR_C)
+        snow_mask = snow_intensity >= _SNOW_ANCHOR_I[0]
+        rgba[snow_mask] = snow_rgba[snow_mask]
+    else:
+        rgba = np.zeros((intensity.shape[0], intensity.shape[1], 4), dtype=np.uint8)
+        for lower, upper, color in RAIN_COLOR_STEPS:
+            _paint_range(rgba, rain, lower, upper, color)
+        for lower, upper, color in SNOW_COLOR_STEPS:
+            _paint_range(rgba, snow_intensity, lower, upper, color)
     image = Image.fromarray(rgba, "RGBA")
-    return image.resize((GRID_WIDTH, GRID_HEIGHT), Image.Resampling.BILINEAR)
+    image = image.resize((GRID_WIDTH, GRID_HEIGHT), Image.Resampling.BILINEAR)
+    return _feather(image)
 
 
 def _download_wms_frames(include_history: bool) -> List[RadarFrame]:
@@ -1701,14 +1783,18 @@ def _render_radar_image(grid: np.ndarray) -> Image.Image:
     nodata_value = int(np.bincount(positive).argmax()) if positive.size else -1
     valid = (values > 0) & (values != nodata_value) & (values < 4090)
 
-    rgba = np.zeros((GRID_HEIGHT, GRID_WIDTH, 4), dtype=np.uint8)
     intensity = np.zeros_like(values, dtype=np.float32)
     intensity[valid] = values[valid].astype(np.float32) / 10.0
 
-    for lower, upper, color in RAIN_COLOR_STEPS:
-        _paint_range(rgba, intensity, lower, upper, color)
+    if SMOOTH_PALETTE:
+        rgba = _ramp_rgba(intensity, _RAIN_ANCHOR_I, _RAIN_ANCHOR_C)
+        rgba[~valid, 3] = 0
+    else:
+        rgba = np.zeros((GRID_HEIGHT, GRID_WIDTH, 4), dtype=np.uint8)
+        for lower, upper, color in RAIN_COLOR_STEPS:
+            _paint_range(rgba, intensity, lower, upper, color)
 
-    return Image.fromarray(rgba, "RGBA")
+    return _feather(Image.fromarray(rgba, "RGBA"))
 
 
 def _paint_range(rgba: np.ndarray, intensity: np.ndarray, lower: float, upper: float, color: Tuple[int, int, int, int]) -> None:

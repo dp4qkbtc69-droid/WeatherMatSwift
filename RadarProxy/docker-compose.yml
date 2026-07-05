@@ -42,6 +42,11 @@ services:
       DWD_RADAR_HOTSPOT_DETAIL_ZOOMS: "${DWD_RADAR_HOTSPOT_DETAIL_ZOOMS:-7,8,9}"
       DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT: "${DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT:-96}"
       DWD_RADAR_HOTSPOT_DETAIL_HALF_KM: "${DWD_RADAR_HOTSPOT_DETAIL_HALF_KM:-75}"
+      # How many user locations to keep warm (app registers all its saved ones).
+      DWD_RADAR_DYNAMIC_HOTSPOTS_MAX: "${DWD_RADAR_DYNAMIC_HOTSPOTS_MAX:-16}"
+      # Optics: continuous colour ramp instead of hard bands + edge feathering.
+      DWD_RADAR_SMOOTH_PALETTE: "${DWD_RADAR_SMOOTH_PALETTE:-true}"
+      DWD_RADAR_FEATHER_RADIUS: "${DWD_RADAR_FEATHER_RADIUS:-0.8}"
       APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
       APNS_KEY_ID: "${APNS_KEY_ID:-}"
       APNS_KEY_PATH: "/apns/AuthKey.p8"

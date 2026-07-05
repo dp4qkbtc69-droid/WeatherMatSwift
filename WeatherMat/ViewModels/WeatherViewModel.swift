@@ -192,6 +192,8 @@ final class WeatherViewModel {
     private var lastForegroundRefresh: Date?
     private let lastWarmedRadarKey = "lastWarmedRadarLocation_v1"
     private let lastWarmedRadarAtKey = "lastWarmedRadarAt_v1"
+    private let lastWarmedAllKey = "lastWarmedAllLocations_v1"
+    private let lastWarmedAllAtKey = "lastWarmedAllLocationsAt_v1"
     /// Re-warm the same location after this long even if it didn't move: the
     /// server keeps dynamic hotspots only in memory, so a proxy restart (deploy,
     /// monthly rebuild, OOM) drops them. Re-warming on a long-absence return
@@ -234,6 +236,28 @@ final class WeatherViewModel {
         }
     }
 
+    /// Registers every saved location with the proxy so each one opens the
+    /// radar from cache. Re-registers when the set changed or the cooldown
+    /// elapsed (proxy keeps hotspots only in memory + a persisted file).
+    @MainActor
+    func warmAllSavedLocations() {
+        let coords = savedLocations.map { (latitude: $0.latitude, longitude: $0.longitude) }
+        guard !coords.isEmpty else { return }
+        let signature = coords
+            .map { String(format: "%.2f,%.2f", $0.latitude, $0.longitude) }
+            .joined(separator: ";")
+        let defaults = UserDefaults.standard
+        let sameSet = defaults.string(forKey: lastWarmedAllKey) == signature
+        let lastAt = defaults.object(forKey: lastWarmedAllAtKey) as? Date
+        let fresh = lastAt.map { Date().timeIntervalSince($0) < radarWarmCooldown } ?? false
+        guard !(sameSet && fresh) else { return }
+        defaults.set(signature, forKey: lastWarmedAllKey)
+        defaults.set(Date(), forKey: lastWarmedAllAtKey)
+        Task.detached(priority: .utility) {
+            await RainRadarService.registerWarmLocations(coords)
+        }
+    }
+
     // MARK: - Location management
     @MainActor
     func addLocation(_ loc: SavedLocation) {
@@ -243,6 +267,7 @@ final class WeatherViewModel {
         selectedDayIndex    = nil
         saveLocations()
         saveActiveLocationIndex()
+        warmAllSavedLocations()
         Task { await loadWeather(for: loc, force: true) }
     }
 
@@ -259,6 +284,7 @@ final class WeatherViewModel {
         normalizeLocationSortOrder()
         saveLocations()
         saveActiveLocationIndex()
+        warmAllSavedLocations()
         if let loc = activeLocation { Task { await loadWeather(for: loc) } }
     }
 
@@ -327,6 +353,7 @@ final class WeatherViewModel {
         // Preserve the last-shown location only when it's a real saved city;
         // if GPS was showing (or nothing is saved yet), default to GPS.
         let keepCurrent = activeLocation.map { !$0.isGPS } ?? false
+        warmAllSavedLocations()
         await useGPSLocation(makeActive: !keepCurrent)
     }
 
@@ -385,6 +412,7 @@ final class WeatherViewModel {
             }
             lastGPSFix = Date()
             saveLocations()
+            warmAllSavedLocations()
 
             // Restore focus: GPS when taking over, otherwise the previously
             // shown location (its index may have shifted from the insert).
