@@ -107,18 +107,21 @@ except ValueError:
     TILE_RENDER_SCALE = 2
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
-APP_VERSION = "smooth-palette-minintensity-2026-07-05"
+APP_VERSION = "rainbow-palette-2026-07-05"
 
-# Hybrid rain palette: blue for light/moderate rain, warning colors
-# (yellow/orange/red) from "kraeftig" upwards. Must stay in sync with
-# RadarLegendStep.steps in the iOS client.
+# Conventional radar rainbow: cyan (very light) -> green -> yellow -> orange
+# -> red -> magenta (extreme). Chosen so the smooth ramp's in-between hues are
+# themselves meaningful radar colours instead of accidental blends (a
+# blue->yellow ramp interpolates through mud-green; this ramp interpolates
+# through cyan/green/yellow/orange, which all read as "more rain"). Must stay
+# in sync with RadarLegendStep.steps in the iOS client.
 RAIN_COLOR_STEPS = (
-    (0.01, 0.3, (207, 238, 253, 105)),
-    (0.3, 0.8, (111, 197, 247, 135)),
-    (0.8, 1.8, (42, 120, 214, 165)),
-    (1.8, 4.0, (247, 208, 56, 195)),
-    (4.0, 8.0, (242, 140, 40, 220)),
-    (8.0, 9999.0, (217, 48, 37, 238)),
+    (0.01, 0.3, (61, 214, 201, 105)),
+    (0.3, 0.8, (67, 187, 96, 135)),
+    (0.8, 1.8, (247, 208, 56, 165)),
+    (1.8, 4.0, (242, 140, 40, 195)),
+    (4.0, 8.0, (217, 48, 37, 220)),
+    (8.0, 9999.0, (194, 24, 130, 238)),
 )
 SNOW_COLOR_STEPS = (
     (0.01, 0.5, (255, 255, 255, 145)),

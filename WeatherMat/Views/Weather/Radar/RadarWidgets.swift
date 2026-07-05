@@ -158,16 +158,16 @@ struct RadarLegendStep: Identifiable {
     let color: Color
     let label: String
 
-    // Hybrid-Rampe: Blau bis "mäßig", Warnfarben ab "kräftig".
-    // Muss synchron zu RAIN_COLOR_STEPS im RadarProxy bleiben.
+    // Conventional radar rainbow: cyan -> green -> yellow -> orange -> red ->
+    // magenta. Must stay in sync with RAIN_COLOR_STEPS in the RadarProxy.
     static let defaultLabels = ["sehr leicht", "leicht", "mäßig", "kräftig", "stark", "extrem"]
     static let steps = [
-        RadarLegendStep(id: "trace", color: Color(hex: "#cfeefd"), label: "sehr leicht"),
-        RadarLegendStep(id: "light", color: Color(hex: "#6fc5f7"), label: "leicht"),
-        RadarLegendStep(id: "moderate", color: Color(hex: "#2a78d6"), label: "mäßig"),
-        RadarLegendStep(id: "strong", color: Color(hex: "#f7d038"), label: "kräftig"),
-        RadarLegendStep(id: "heavy", color: Color(hex: "#f28c28"), label: "stark"),
-        RadarLegendStep(id: "severe", color: Color(hex: "#d93025"), label: "extrem")
+        RadarLegendStep(id: "trace", color: Color(hex: "#3dd6c9"), label: "sehr leicht"),
+        RadarLegendStep(id: "light", color: Color(hex: "#43bb60"), label: "leicht"),
+        RadarLegendStep(id: "moderate", color: Color(hex: "#f7d038"), label: "mäßig"),
+        RadarLegendStep(id: "strong", color: Color(hex: "#f28c28"), label: "kräftig"),
+        RadarLegendStep(id: "heavy", color: Color(hex: "#d93025"), label: "stark"),
+        RadarLegendStep(id: "severe", color: Color(hex: "#c21882"), label: "extrem")
     ]
 }
 
@@ -198,11 +198,11 @@ struct RadarGradient: ShapeStyle {
     func resolve(in environment: EnvironmentValues) -> some ShapeStyle {
         LinearGradient(
             stops: [
-                .init(color: Color(hex: "#cfeefd"), location: 0.0),
-                .init(color: Color(hex: "#6fc5f7"), location: 0.24),
-                .init(color: Color(hex: "#2a78d6"), location: 0.50),
-                .init(color: Color(hex: "#f7d038"), location: 0.74),
-                .init(color: Color(hex: "#d93025"), location: 1.0)
+                .init(color: Color(hex: "#3dd6c9"), location: 0.0),
+                .init(color: Color(hex: "#43bb60"), location: 0.24),
+                .init(color: Color(hex: "#f7d038"), location: 0.50),
+                .init(color: Color(hex: "#f28c28"), location: 0.74),
+                .init(color: Color(hex: "#c21882"), location: 1.0)
             ],
             startPoint: .top,
             endPoint: .bottom
