@@ -8,6 +8,7 @@ struct RainRadarFrame: Identifiable, Equatable {
     let isForecast: Bool
     let sourceKind: SourceKind
     let precipitationType: PrecipitationType
+    let referenceTime: Date?
 
     var id: String { "\(path)-\(Int(time.timeIntervalSince1970))" }
 
@@ -86,7 +87,8 @@ enum RainRadarService {
                     path: $0.path,
                     isForecast: $0.isForecast,
                     sourceKind: $0.sourceKind,
-                    precipitationType: $0.precipitationType
+                    precipitationType: $0.precipitationType,
+                    referenceTime: $0.referenceTime
                 )
             },
             savedAt: Date()
@@ -128,7 +130,8 @@ enum RainRadarService {
                 path: "/tiles/\(frame.id)",
                 isForecast: frame.isForecast,
                 sourceKind: RainRadarFrame.SourceKind(rawValue: frame.source ?? "") ?? .unknown,
-                precipitationType: RainRadarFrame.PrecipitationType(rawValue: frame.precipitationType ?? "") ?? .unknown
+                precipitationType: RainRadarFrame.PrecipitationType(rawValue: frame.precipitationType ?? "") ?? .unknown,
+                referenceTime: frame.referenceTime.flatMap(RainRadarService.parseDwdDate)
             )
         }
         guard !frames.isEmpty else { throw URLError(.cannotParseResponse) }
@@ -155,14 +158,16 @@ enum RainRadarService {
                            path: $0.path,
                            isForecast: false,
                            sourceKind: .rainViewer,
-                           precipitationType: .unknown)
+                           precipitationType: .unknown,
+                           referenceTime: nil)
         }
         let forecast = (raw.radar.nowcast ?? []).map {
             RainRadarFrame(time: Date(timeIntervalSince1970: TimeInterval($0.time)),
                            path: $0.path,
                            isForecast: true,
                            sourceKind: .rainViewer,
-                           precipitationType: .unknown)
+                           precipitationType: .unknown,
+                           referenceTime: nil)
         }
         return RainRadarTimeline(
             host: raw.host,
@@ -251,6 +256,7 @@ private struct CachedRadarTimeline: Codable {
         let isForecast: Bool
         let sourceKind: RainRadarFrame.SourceKind?
         let precipitationType: RainRadarFrame.PrecipitationType?
+        let referenceTime: Date?
     }
     let host: String
     let attribution: String
@@ -271,7 +277,8 @@ private struct CachedRadarTimeline: Codable {
                     path: $0.path,
                     isForecast: $0.isForecast,
                     sourceKind: $0.sourceKind ?? (isDwd ? .dwdRadar : .rainViewer),
-                    precipitationType: $0.precipitationType ?? .unknown
+                    precipitationType: $0.precipitationType ?? .unknown,
+                    referenceTime: $0.referenceTime
                 )
             }
         )
@@ -306,6 +313,7 @@ private struct DwdRadarFrameResponse: Decodable {
     let isForecast: Bool
     let source: String?
     let precipitationType: String?
+    let referenceTime: String?
 }
 
 private struct RainViewerResponse: Decodable {

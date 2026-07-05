@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bz2
+import gzip
 import hashlib
 import hmac
 import io
@@ -52,6 +53,7 @@ ICON_FORECAST_HOURS = int(os.environ.get("DWD_ICON_FORECAST_HOURS", "120"))
 ICON_RAW_FORECAST_HOURS = int(os.environ.get("DWD_ICON_RAW_FORECAST_HOURS", "72"))
 ICON_RAW_MAX_FRAMES = int(os.environ.get("DWD_ICON_RAW_MAX_FRAMES", "72"))
 ICON_RAW_STEP_HOURS = int(os.environ.get("DWD_ICON_RAW_STEP_HOURS", "1"))
+RADAR_HANDOFF_MINUTES = max(0, int(os.environ.get("DWD_RADAR_HANDOFF_MINUTES", "60")))
 ICON_RAW_BASE_URL = os.environ.get("DWD_ICON_RAW_BASE_URL", "https://opendata.dwd.de/weather/nwp/icon-eu/grib/")
 DISK_CACHE_MAX_AGE_SECONDS = int(os.environ.get("DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS", "86400"))
 DISK_CACHE_PRUNE_INTERVAL_SECONDS = int(os.environ.get("DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS", "3600"))
@@ -105,18 +107,21 @@ except ValueError:
     TILE_RENDER_SCALE = 2
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
-APP_VERSION = "smooth-palette-minintensity-2026-07-05"
+APP_VERSION = "rainbow-palette-2026-07-05"
 
-# Hybrid rain palette: blue for light/moderate rain, warning colors
-# (yellow/orange/red) from "kraeftig" upwards. Must stay in sync with
-# RadarLegendStep.steps in the iOS client.
+# Conventional radar rainbow: cyan (very light) -> green -> yellow -> orange
+# -> red -> magenta (extreme). Chosen so the smooth ramp's in-between hues are
+# themselves meaningful radar colours instead of accidental blends (a
+# blue->yellow ramp interpolates through mud-green; this ramp interpolates
+# through cyan/green/yellow/orange, which all read as "more rain"). Must stay
+# in sync with RadarLegendStep.steps in the iOS client.
 RAIN_COLOR_STEPS = (
-    (0.01, 0.3, (207, 238, 253, 105)),
-    (0.3, 0.8, (111, 197, 247, 135)),
-    (0.8, 1.8, (42, 120, 214, 165)),
-    (1.8, 4.0, (247, 208, 56, 195)),
-    (4.0, 8.0, (242, 140, 40, 220)),
-    (8.0, 9999.0, (217, 48, 37, 238)),
+    (0.01, 0.3, (61, 214, 201, 105)),
+    (0.3, 0.8, (67, 187, 96, 135)),
+    (0.8, 1.8, (247, 208, 56, 165)),
+    (1.8, 4.0, (242, 140, 40, 195)),
+    (4.0, 8.0, (217, 48, 37, 220)),
+    (8.0, 9999.0, (194, 24, 130, 238)),
 )
 SNOW_COLOR_STEPS = (
     (0.01, 0.5, (255, 255, 255, 145)),
@@ -171,7 +176,7 @@ WARNING_POLL_SECONDS = int(os.environ.get("WARNING_POLL_SECONDS", "300"))
 PUSH_STATE_PATH = Path(os.environ.get("PUSH_STATE_PATH", "push_state.json"))
 HOTSPOTS_STATE_PATH = Path(os.environ.get("HOTSPOTS_STATE_PATH", "hotspots.json"))
 _SEVERITY_RANK = {"Minor": 0, "Moderate": 1, "Severe": 2, "Extreme": 3}
-TILE_CACHE_VERSION = os.environ.get("RADAR_TILE_CACHE_VERSION", APP_VERSION)
+TILE_CACHE_VERSION = os.environ.get("RADAR_TILE_CACHE_VERSION", f"{APP_VERSION}|handoff-v1")
 WEB_MERCATOR_LIMIT = 20037508.342789244
 
 # Practical coverage of the DE1200 composite for the legacy raster renderer.
@@ -197,6 +202,8 @@ class RadarFrame:
     time: datetime
     is_forecast: bool
     image: Image.Image
+    rain: np.ndarray | None = None
+    snow: np.ndarray | None = None
     layer_name: str | None = None
     reference_time: datetime | None = None
     precipitation_type: str = "unknown"
@@ -208,6 +215,8 @@ class RadarCache:
     frames: List[RadarFrame]
     tile_cache: Dict[Tuple[str, int, int, int], bytes]
     tile_cache_lock: threading.Lock = field(default_factory=threading.Lock)
+    region_pack_cache: Dict[Tuple[float, float, float, int, float], bytes] = field(default_factory=dict)
+    region_pack_cache_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 app = FastAPI(title="WeatherMat DWD Radar Proxy")
@@ -340,6 +349,45 @@ def tile(request: Request, frame_id: str, z: int, x: int, y: int) -> Response:
     _metric_increment("tileRequests")
     data, _ = _tile_bytes(cache, frame, z, x, y)
     return Response(content=data, media_type="image/png", headers={"Cache-Control": "public, max-age=600"})
+
+
+@app.get("/region-pack")
+def region_pack(request: Request, lat: float, lon: float, km: float = 130.0, frames: str = "all") -> Response:
+    _require_token(request)
+    if not (-85.0 <= lat <= 85.0 and -180.0 <= lon <= 180.0):
+        raise HTTPException(status_code=400, detail="Invalid coordinate")
+    if not (20.0 <= km <= 800.0):
+        raise HTTPException(status_code=400, detail="Invalid region size")
+    if frames != "all":
+        raise HTTPException(status_code=400, detail="Only frames=all is supported")
+    try:
+        cache = _ensure_cache()
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=f"Radar cache build failed: {error}") from error
+
+    rounded_lat = round(lat, 3)
+    rounded_lon = round(lon, 3)
+    rounded_km = round(km, 1)
+    grid_size = int(os.environ.get("DWD_RADAR_REGION_GRID_SIZE", "384"))
+    grid_size = max(96, min(512, grid_size))
+    key = (rounded_lat, rounded_lon, rounded_km, grid_size, cache.loaded_at)
+    with cache.region_pack_cache_lock:
+        cached = cache.region_pack_cache.get(key)
+    if cached is None:
+        cached = _build_region_pack(cache, rounded_lat, rounded_lon, rounded_km, grid_size)
+        with cache.region_pack_cache_lock:
+            while len(cache.region_pack_cache) > 24:
+                cache.region_pack_cache.pop(next(iter(cache.region_pack_cache)))
+            cache.region_pack_cache[key] = cached
+    return Response(
+        content=cached,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Encoding": "gzip",
+            "Cache-Control": "private, max-age=120",
+            "X-Region-Pack-Bytes": str(len(cached)),
+        },
+    )
 
 
 def _frame_source(frame: RadarFrame) -> str:
@@ -915,6 +963,140 @@ def _tile_bytes(cache: RadarCache, frame: RadarFrame, z: int, x: int, y: int) ->
     return data, False
 
 
+def _build_region_pack(cache: RadarCache, lat: float, lon: float, km: float, grid_size: int) -> bytes:
+    usable_frames = [frame for frame in cache.frames if frame.rain is not None]
+    if not usable_frames:
+        raise HTTPException(status_code=404, detail="No raw radar frames available for region pack")
+
+    mercator = _region_mercator_rect(lat, lon, km)
+    west, south = _mercator_to_lon_lat(mercator[0], mercator[1])
+    east, north = _mercator_to_lon_lat(mercator[2], mercator[3])
+    scale = float(os.environ.get("DWD_RADAR_REGION_QUANT_SCALE", "5.0"))
+    payload = bytearray()
+    frame_headers: List[dict] = []
+    has_snow = any(frame.snow is not None for frame in usable_frames)
+
+    for frame in usable_frames:
+        rain = _quantize_region_grid(
+            _sample_region_grid(frame.rain, mercator, grid_size),
+            scale,
+        )
+        offset = len(payload)
+        payload.extend(rain.tobytes(order="C"))
+
+        snow_offset: int | None = None
+        if frame.snow is not None:
+            snow = _quantize_region_grid(
+                _sample_region_grid(frame.snow, mercator, grid_size),
+                scale,
+            )
+            snow_offset = len(payload)
+            payload.extend(snow.tobytes(order="C"))
+
+        frame_headers.append(
+            {
+                "id": frame.frame_id,
+                "time": frame.time.isoformat(),
+                "isForecast": frame.is_forecast,
+                "source": _frame_source(frame),
+                "referenceTime": frame.reference_time.isoformat() if frame.reference_time else None,
+                "precipType": frame.precipitation_type,
+                "offsetBytes": offset,
+                "snowOffsetBytes": snow_offset,
+            }
+        )
+
+    header = {
+        "bbox": {"west": west, "south": south, "east": east, "north": north},
+        "mercator": {"minX": mercator[0], "minY": mercator[1], "maxX": mercator[2], "maxY": mercator[3]},
+        "grid": {"w": grid_size, "h": grid_size},
+        "scale": scale,
+        "hasSnow": has_snow,
+        "palette": {
+            "rain": _palette_json(RAIN_COLOR_STEPS),
+            "snow": _palette_json(SNOW_COLOR_STEPS),
+        },
+        "minIntensity": MIN_INTENSITY,
+        "featherRadius": FEATHER_RADIUS,
+        "frames": frame_headers,
+    }
+    raw = json.dumps(header, separators=(",", ":")).encode("utf-8") + b"\n" + bytes(payload)
+    return gzip.compress(raw, compresslevel=6)
+
+
+def _palette_json(steps: Tuple[Tuple[float, float, Tuple[int, int, int, int]], ...]) -> List[dict]:
+    return [
+        {"lower": lower, "upper": upper, "rgba": list(color)}
+        for lower, upper, color in steps
+    ]
+
+
+def _region_mercator_rect(lat: float, lon: float, km: float) -> Tuple[float, float, float, float]:
+    center_x, center_y = _lon_lat_to_mercator(lon, lat)
+    # `km` is a ground distance. Web-Mercator units stretch by sec(latitude),
+    # so expand the meter span here; otherwise a 130 km request around 50N
+    # covers only about 84 km on the ground and misses the app's opening view.
+    scale = 1.0 / max(0.15, math.cos(math.radians(max(-85.0, min(85.0, lat)))))
+    half = km * 1000.0 * scale / 2.0
+    return (
+        max(-WEB_MERCATOR_LIMIT, center_x - half),
+        max(-WEB_MERCATOR_LIMIT, center_y - half),
+        min(WEB_MERCATOR_LIMIT, center_x + half),
+        min(WEB_MERCATOR_LIMIT, center_y + half),
+    )
+
+
+def _lon_lat_to_mercator(lon: float, lat: float) -> Tuple[float, float]:
+    clamped_lat = max(-85.05112878, min(85.05112878, lat))
+    x = lon / 180.0 * WEB_MERCATOR_LIMIT
+    y = math.log(math.tan(math.pi / 4.0 + math.radians(clamped_lat) / 2.0)) / math.pi * WEB_MERCATOR_LIMIT
+    return x, y
+
+
+def _mercator_to_lon_lat(x: float, y: float) -> Tuple[float, float]:
+    lon = x / WEB_MERCATOR_LIMIT * 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * y / WEB_MERCATOR_LIMIT)))
+    return lon, lat
+
+
+def _sample_region_grid(source: np.ndarray | None, mercator: Tuple[float, float, float, float], grid_size: int) -> np.ndarray:
+    if source is None:
+        return np.zeros((grid_size, grid_size), dtype=np.float32)
+
+    min_x, min_y, max_x, max_y = mercator
+    xs = np.linspace(min_x, max_x, grid_size, endpoint=False, dtype=np.float64) + (max_x - min_x) / (grid_size * 2.0)
+    ys = np.linspace(max_y, min_y, grid_size, endpoint=False, dtype=np.float64) - (max_y - min_y) / (grid_size * 2.0)
+    lon = xs / WEB_MERCATOR_LIMIT * 180.0
+    lat = np.degrees(np.arctan(np.sinh(np.pi * ys / WEB_MERCATOR_LIMIT)))
+
+    bbox_west, bbox_south, bbox_east, bbox_north = RADAR_BBOX
+    src_h, src_w = source.shape
+    col = (lon - bbox_west) / (bbox_east - bbox_west) * (src_w - 1)
+    row = (bbox_north - lat) / (bbox_north - bbox_south) * (src_h - 1)
+    col_grid, row_grid = np.meshgrid(col, row)
+    inside = (col_grid >= 0) & (col_grid <= src_w - 1) & (row_grid >= 0) & (row_grid <= src_h - 1)
+
+    c0 = np.floor(np.clip(col_grid, 0, src_w - 1)).astype(np.int32)
+    r0 = np.floor(np.clip(row_grid, 0, src_h - 1)).astype(np.int32)
+    c1 = np.minimum(c0 + 1, src_w - 1)
+    r1 = np.minimum(r0 + 1, src_h - 1)
+    dc = (col_grid - c0).astype(np.float32)
+    dr = (row_grid - r0).astype(np.float32)
+
+    sampled = (
+        source[r0, c0] * (1.0 - dc) * (1.0 - dr)
+        + source[r0, c1] * dc * (1.0 - dr)
+        + source[r1, c0] * (1.0 - dc) * dr
+        + source[r1, c1] * dc * dr
+    ).astype(np.float32)
+    sampled[~inside] = 0.0
+    return sampled
+
+
+def _quantize_region_grid(intensity: np.ndarray, scale: float) -> np.ndarray:
+    return np.clip(np.rint(np.maximum(intensity, 0.0) * scale), 0, 255).astype(np.uint8)
+
+
 def _ensure_cache() -> RadarCache:
     global _cache, _refreshing
     now = time.time()
@@ -1211,7 +1393,12 @@ def _download_frames(include_history: bool) -> List[RadarFrame]:
         try:
             blank = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
             after = max((frame.time for frame in combined), default=latest_base)
-            icon_raw = _download_icon_raw_frames(after=after)
+            handoff_from = max(
+                (frame for frame in combined if _frame_source(frame) == "dwd-rv" and frame.rain is not None),
+                key=lambda frame: frame.time,
+                default=None,
+            )
+            icon_raw = _download_icon_raw_frames(after=after, handoff_from=handoff_from)
             if icon_raw:
                 combined.extend(icon_raw)
                 wms_after = max((frame.time for frame in icon_raw), default=after)
@@ -1234,7 +1421,7 @@ def _download_frames(include_history: bool) -> List[RadarFrame]:
     return combined
 
 
-def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
+def _download_icon_raw_frames(after: datetime, handoff_from: RadarFrame | None = None) -> List[RadarFrame]:
     if ICON_RAW_MODE not in {"auto", "raw", "raw-grib", "grib"}:
         return []
     if not _icon_raw_decoder_available():
@@ -1253,6 +1440,7 @@ def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
             cached_frames = list(_icon_raw_cache.get("frames") or [])
             if cached_reference == reference_time and cached_frames:
                 frames = [frame for frame in cached_frames if frame.time > after]
+                frames = _apply_icon_handoff(frames, after, handoff_from)
                 _metric_increment("iconRawCacheHits")
                 _metric_set("lastIconRawRun", f"{run_hour}/{reference_time.isoformat()}")
                 _metric_set("lastIconRawError", None)
@@ -1292,6 +1480,8 @@ def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
                     time=frame_time,
                     is_forecast=True,
                     image=_render_icon_raw_image(intensity, snow_intensity),
+                    rain=np.maximum(intensity - snow_intensity, 0.0).astype(np.float32),
+                    snow=snow_intensity.astype(np.float32),
                     reference_time=reference_time,
                     precipitation_type=precipitation_type,
                 )
@@ -1301,7 +1491,7 @@ def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
             _icon_raw_cache["referenceTime"] = reference_time
             _icon_raw_cache["runHour"] = run_hour
             _icon_raw_cache["frames"] = frames
-        filtered_frames = [frame for frame in frames if frame.time > after]
+        filtered_frames = _apply_icon_handoff([frame for frame in frames if frame.time > after], after, handoff_from)
         _metric_set("lastIconRawRun", f"{run_hour}/{reference_time.isoformat()}")
         _metric_set("lastIconRawError", None)
         _metric_set("iconRawFrames", len(filtered_frames))
@@ -1311,6 +1501,61 @@ def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
         _metric_set("lastIconRawError", str(error))
         logger.warning("ICON raw unavailable: %s", error)
         return []
+
+
+def _apply_icon_handoff(frames: List[RadarFrame], after: datetime, handoff_from: RadarFrame | None) -> List[RadarFrame]:
+    if RADAR_HANDOFF_MINUTES <= 0 or handoff_from is None or handoff_from.rain is None:
+        return frames
+    window_seconds = RADAR_HANDOFF_MINUTES * 60.0
+    if window_seconds <= 0:
+        return frames
+
+    blended: List[RadarFrame] = []
+    for frame in frames:
+        if frame.rain is None:
+            blended.append(frame)
+            continue
+        elapsed = (frame.time - after).total_seconds()
+        nowcast_weight = max(0.0, min(1.0, 1.0 - elapsed / window_seconds))
+        if nowcast_weight <= 0.0:
+            blended.append(frame)
+            continue
+
+        model_rain = frame.rain.astype(np.float32)
+        model_snow = frame.snow.astype(np.float32) if frame.snow is not None else np.zeros_like(model_rain)
+        nowcast_rain = _resample_float_grid(handoff_from.rain, model_rain.shape)
+        if handoff_from.snow is not None:
+            nowcast_snow = _resample_float_grid(handoff_from.snow, model_rain.shape)
+        else:
+            nowcast_snow = np.zeros_like(model_rain)
+
+        model_weight = 1.0 - nowcast_weight
+        rain = (nowcast_rain * nowcast_weight + model_rain * model_weight).astype(np.float32)
+        snow = (nowcast_snow * nowcast_weight + model_snow * model_weight).astype(np.float32)
+        total = np.maximum(rain + snow, 0.0).astype(np.float32)
+        precipitation_type = _precipitation_type(total, snow)
+        blended.append(
+            RadarFrame(
+                frame_id=frame.frame_id,
+                time=frame.time,
+                is_forecast=frame.is_forecast,
+                image=_render_icon_raw_image(total, snow),
+                rain=rain,
+                snow=snow,
+                layer_name=frame.layer_name,
+                reference_time=frame.reference_time,
+                precipitation_type=precipitation_type,
+            )
+        )
+    return blended
+
+
+def _resample_float_grid(source: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+    if source.shape == shape:
+        return source.astype(np.float32)
+    image = Image.fromarray(source.astype(np.float32), mode="F")
+    resized = image.resize((shape[1], shape[0]), Image.Resampling.BILINEAR)
+    return np.asarray(resized, dtype=np.float32)
 
 
 def _precipitation_type(intensity: np.ndarray, snow_intensity: np.ndarray) -> str:
@@ -1756,9 +2001,10 @@ def _parse_frame(name: str, raw: bytes) -> RadarFrame | None:
         return None
 
     grid = np.frombuffer(payload[:expected], dtype="<u2").reshape((GRID_HEIGHT, GRID_WIDTH))
-    image = _render_radar_image(grid)
+    intensity, valid = _radar_intensity_from_grid(grid)
+    image = _render_radar_image_from_intensity(intensity, valid)
     time_value, is_forecast = _time_from_name(name)
-    return RadarFrame(frame_id=name, time=time_value, is_forecast=is_forecast, image=image)
+    return RadarFrame(frame_id=name, time=time_value, is_forecast=is_forecast, image=image, rain=intensity)
 
 
 def _time_from_name(name: str) -> Tuple[datetime, bool]:
@@ -1782,6 +2028,11 @@ def _is_native_timeline_frame(frame: RadarFrame) -> bool:
 
 
 def _render_radar_image(grid: np.ndarray) -> Image.Image:
+    intensity, valid = _radar_intensity_from_grid(grid)
+    return _render_radar_image_from_intensity(intensity, valid)
+
+
+def _radar_intensity_from_grid(grid: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     raw_values = grid.astype(np.uint16)
     values = raw_values & np.uint16(0x0FFF)
 
@@ -1791,16 +2042,21 @@ def _render_radar_image(grid: np.ndarray) -> Image.Image:
 
     intensity = np.zeros_like(values, dtype=np.float32)
     intensity[valid] = values[valid].astype(np.float32) / 10.0
+    return intensity, valid
+
+
+def _render_radar_image_from_intensity(intensity: np.ndarray, valid: np.ndarray) -> Image.Image:
+    display_intensity = intensity.copy()
     if MIN_INTENSITY > 0:
-        intensity[intensity < MIN_INTENSITY] = 0.0
+        display_intensity[display_intensity < MIN_INTENSITY] = 0.0
 
     if SMOOTH_PALETTE:
-        rgba = _ramp_rgba(intensity, _RAIN_ANCHOR_I, _RAIN_ANCHOR_C)
+        rgba = _ramp_rgba(display_intensity, _RAIN_ANCHOR_I, _RAIN_ANCHOR_C)
         rgba[~valid, 3] = 0
     else:
-        rgba = np.zeros((GRID_HEIGHT, GRID_WIDTH, 4), dtype=np.uint8)
+        rgba = np.zeros((intensity.shape[0], intensity.shape[1], 4), dtype=np.uint8)
         for lower, upper, color in RAIN_COLOR_STEPS:
-            _paint_range(rgba, intensity, lower, upper, color)
+            _paint_range(rgba, display_intensity, lower, upper, color)
 
     return _feather(Image.fromarray(rgba, "RGBA"))
 

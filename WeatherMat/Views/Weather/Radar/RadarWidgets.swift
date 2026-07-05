@@ -39,6 +39,8 @@ struct RadarRoundButton: View {
 struct RadarLegendView: View {
     var attribution: String?
     var isFallbackSource = false
+    var rainPalette: [RadarPaletteStep]?
+    var currentFrame: RainRadarFrame?
     let close: () -> Void
 
     var body: some View {
@@ -66,14 +68,14 @@ struct RadarLegendView: View {
                     .foregroundStyle(AppColors.selection)
             } else {
                 HStack(spacing: 1) {
-                    ForEach(RadarLegendStep.steps) { step in
+                    ForEach(legendSteps) { step in
                         step.color.frame(maxWidth: .infinity, minHeight: 8, maxHeight: 8)
                     }
                 }
                 .clipShape(Capsule())
 
                 HStack(spacing: 1) {
-                    ForEach(RadarLegendStep.steps) { step in
+                    ForEach(legendSteps) { step in
                         Text(step.label)
                             .font(.system(.caption2, weight: .medium))
                             .lineLimit(1)
@@ -97,6 +99,13 @@ struct RadarLegendView: View {
                 .font(.system(.caption2, weight: .regular))
                 .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(2)
+
+            if let modelInfoText {
+                Text(modelInfoText)
+                    .font(.system(.caption2, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(3)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -107,7 +116,40 @@ struct RadarLegendView: View {
         if isFallbackSource {
             return attribution ?? "RainViewer"
         }
-        return "DWD-Radarkomposit · Vorhersage: ICON-EU"
+        return "DWD-Radarkomposit · Nowcast + ICON-EU"
+    }
+
+    private var modelInfoText: String? {
+        guard !isFallbackSource, currentFrame?.sourceKind == .iconEuRaw else { return nil }
+        var text = "Modell-Frames sind ein einzelner Lauf; Gewitter können zeitlich oder örtlich abweichen."
+        if let referenceTime = currentFrame?.referenceTime {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "de_DE")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "HH:mm"
+            let run = formatter.string(from: referenceTime)
+            text += " Modelllauf: \(run) UTC."
+        }
+        return text
+    }
+
+    private var legendSteps: [RadarLegendStep] {
+        guard let rainPalette, rainPalette.count == RadarLegendStep.defaultLabels.count else {
+            return RadarLegendStep.steps
+        }
+        return zip(rainPalette, RadarLegendStep.defaultLabels).enumerated().map { index, item in
+            let (step, label) = item
+            return RadarLegendStep(
+                id: "server-\(index)-\(step.lower)",
+                color: Color(
+                    red: Double(step.rgba[safe: 0] ?? 0) / 255.0,
+                    green: Double(step.rgba[safe: 1] ?? 0) / 255.0,
+                    blue: Double(step.rgba[safe: 2] ?? 0) / 255.0,
+                    opacity: 1.0
+                ),
+                label: label
+            )
+        }
     }
 }
 
@@ -116,15 +158,16 @@ struct RadarLegendStep: Identifiable {
     let color: Color
     let label: String
 
-    // Hybrid-Rampe: Blau bis "mäßig", Warnfarben ab "kräftig".
-    // Muss synchron zu RAIN_COLOR_STEPS im RadarProxy bleiben.
+    // Conventional radar rainbow: cyan -> green -> yellow -> orange -> red ->
+    // magenta. Must stay in sync with RAIN_COLOR_STEPS in the RadarProxy.
+    static let defaultLabels = ["sehr leicht", "leicht", "mäßig", "kräftig", "stark", "extrem"]
     static let steps = [
-        RadarLegendStep(id: "trace", color: Color(hex: "#cfeefd"), label: "sehr leicht"),
-        RadarLegendStep(id: "light", color: Color(hex: "#6fc5f7"), label: "leicht"),
-        RadarLegendStep(id: "moderate", color: Color(hex: "#2a78d6"), label: "mäßig"),
-        RadarLegendStep(id: "strong", color: Color(hex: "#f7d038"), label: "kräftig"),
-        RadarLegendStep(id: "heavy", color: Color(hex: "#f28c28"), label: "stark"),
-        RadarLegendStep(id: "severe", color: Color(hex: "#d93025"), label: "extrem")
+        RadarLegendStep(id: "trace", color: Color(hex: "#3dd6c9"), label: "sehr leicht"),
+        RadarLegendStep(id: "light", color: Color(hex: "#43bb60"), label: "leicht"),
+        RadarLegendStep(id: "moderate", color: Color(hex: "#f7d038"), label: "mäßig"),
+        RadarLegendStep(id: "strong", color: Color(hex: "#f28c28"), label: "kräftig"),
+        RadarLegendStep(id: "heavy", color: Color(hex: "#d93025"), label: "stark"),
+        RadarLegendStep(id: "severe", color: Color(hex: "#c21882"), label: "extrem")
     ]
 }
 
@@ -155,11 +198,11 @@ struct RadarGradient: ShapeStyle {
     func resolve(in environment: EnvironmentValues) -> some ShapeStyle {
         LinearGradient(
             stops: [
-                .init(color: Color(hex: "#cfeefd"), location: 0.0),
-                .init(color: Color(hex: "#6fc5f7"), location: 0.24),
-                .init(color: Color(hex: "#2a78d6"), location: 0.50),
-                .init(color: Color(hex: "#f7d038"), location: 0.74),
-                .init(color: Color(hex: "#d93025"), location: 1.0)
+                .init(color: Color(hex: "#3dd6c9"), location: 0.0),
+                .init(color: Color(hex: "#43bb60"), location: 0.24),
+                .init(color: Color(hex: "#f7d038"), location: 0.50),
+                .init(color: Color(hex: "#f28c28"), location: 0.74),
+                .init(color: Color(hex: "#c21882"), location: 1.0)
             ],
             startPoint: .top,
             endPoint: .bottom

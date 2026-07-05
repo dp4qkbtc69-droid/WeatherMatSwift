@@ -52,8 +52,8 @@ final class RadarV2Store {
         return selectedFrame.time.formatted(.dateTime.weekday(.abbreviated).day().month(.wide).hour().minute().locale(.init(identifier: "de_DE")))
     }
 
-    // User-facing wording: "Radar" (observation) vs. "Vorhersage" (forecast).
-    // Model names (ICON-EU, DWD RV) stay in the legend as provenance only.
+    // User-facing wording distinguishes observations, radar nowcast, and
+    // model frames because their reliability differs visibly.
     /// Compact "when" for the persistent time anchor shown while the chrome
     /// is auto-hidden during playback, e.g. "Heute 14:00", "Morgen 09:00",
     /// "Sa. 14:00".
@@ -71,6 +71,12 @@ final class RadarV2Store {
         guard let selectedFrame else { return "Radar" }
         if selectedFrame.precipitationType == .snow {
             return "Schnee"
+        }
+        if selectedFrame.sourceKind == .iconEuRaw {
+            return "Modell"
+        }
+        if selectedFrame.sourceKind == .dwdRadar, selectedFrame.isForecast {
+            return "Nowcast"
         }
         return selectedFrame.isForecast ? "Vorhersage" : "Radar"
     }
