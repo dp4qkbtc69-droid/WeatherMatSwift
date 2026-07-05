@@ -17,7 +17,8 @@ struct RadarLogicTests {
             path: "/tiles/frame-\(minutes)",
             isForecast: isForecast,
             sourceKind: sourceKind,
-            precipitationType: .unknown
+            precipitationType: .unknown,
+            referenceTime: nil
         )
     }
 
@@ -105,7 +106,8 @@ struct RadarLogicTests {
                 path: "/tiles/bucket-\(offset)",
                 isForecast: false,
                 sourceKind: .dwdRadar,
-                precipitationType: .unknown
+                precipitationType: .unknown,
+                referenceTime: nil
             )
         }
 

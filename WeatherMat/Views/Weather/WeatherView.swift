@@ -67,6 +67,12 @@ struct WeatherView: View {
                     .padding(.horizontal)
                     .simultaneousGesture(locationSwipeGesture)
 
+                // Coarse day outlook (kräftiger Regen/Gewitter) — silent on
+                // ordinary days, only surfaces above-light-rain events.
+                DayOutlookView(outlook: vm.hourlyOutlook)
+                    .padding(.horizontal)
+                    .simultaneousGesture(locationSwipeGesture)
+
                 // Hourly forecast
                 HourlyView(entries: vm.hourlyForActiveView, label: vm.hourlyLabel)
 

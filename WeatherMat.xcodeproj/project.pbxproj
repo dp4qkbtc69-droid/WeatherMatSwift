@@ -34,6 +34,7 @@
 		51CE192F1411A60730AF21FA /* WeatherMatSwiftTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90B641CF24AC0C0C89D5285C /* WeatherMatSwiftTesting.swift */; };
 		54025F3A5E837DB8A15DDE6D /* MapKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 084D10516E7127C94BA7CA73 /* MapKit.framework */; };
 		559C5B9ACB690944BB2065B0 /* RainRadarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7E0E9466BCF727A6452F474 /* RainRadarView.swift */; };
+		5686D0D98A2110E2046048F8 /* DayOutlookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00FF5111F3E242FF85A20F1A /* DayOutlookView.swift */; };
 		56D6965E1123BB4173F149B6 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CCBAF145CE41DB626539D57 /* LocationService.swift */; };
 		56E908537AECA29C1AEDA1DF /* BrightSkyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C789EC5CA9E9B7A1AB7923B /* BrightSkyService.swift */; };
 		6B27740B637B5FF574FB5527 /* WMOCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89FC9B896677E55B940A006B /* WMOCode.swift */; };
@@ -77,6 +78,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		00FF5111F3E242FF85A20F1A /* DayOutlookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayOutlookView.swift; sourceTree = "<group>"; };
 		011F929AC4A3CF524A757151 /* WeatherModels+Codable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WeatherModels+Codable.swift"; sourceTree = "<group>"; };
 		062FD7A808627CE0D0C6DA77 /* RadarLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadarLogicTests.swift; sourceTree = "<group>"; };
 		084D10516E7127C94BA7CA73 /* MapKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MapKit.framework; path = System/Library/Frameworks/MapKit.framework; sourceTree = SDKROOT; };
@@ -178,6 +180,7 @@
 			isa = PBXGroup;
 			children = (
 				FFF05A5460B28EFFF2662544 /* DailyView.swift */,
+				00FF5111F3E242FF85A20F1A /* DayOutlookView.swift */,
 				0913FF75365334E1A49039C6 /* HeroView.swift */,
 				0BC21502C2A5A5D8D627F3DC /* HourlyView.swift */,
 				4A4492CCE9DCF1A1640CE4F5 /* RainBannerView.swift */,
@@ -449,6 +452,7 @@
 				046BB5DEEC2EFF2F4A92F3F3 /* Concurrency.swift in Sources */,
 				975A5062EB4407B63FBA6A55 /* ContentView.swift in Sources */,
 				8610B87782552E27B54F9816 /* DailyView.swift in Sources */,
+				5686D0D98A2110E2046048F8 /* DayOutlookView.swift in Sources */,
 				EB5B9A4EA286ADB9EFCA39FB /* DesignTokens.swift in Sources */,
 				CB69A091EE12F9BB99CA8ADD /* EnsembleService.swift in Sources */,
 				C9D70E61519D574530F5221C /* ForecastCalibrationStore.swift in Sources */,

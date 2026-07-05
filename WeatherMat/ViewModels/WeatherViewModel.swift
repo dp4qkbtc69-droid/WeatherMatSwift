@@ -97,6 +97,14 @@ final class WeatherViewModel {
         return data.hourly.filter { cal.isDate($0.time, inSameDayAs: day.date) }
     }
 
+    /// Coarse outlook for the active day ("kräftiger Regen ab 16:00", "Gewitter
+    /// möglich") — nil when nothing beyond light rain is expected, so the UI
+    /// stays silent on ordinary days instead of showing a permanent "all
+    /// clear" chip.
+    var hourlyOutlook: HourlyOutlook? {
+        EnsembleService.hourlyOutlook(hourly: hourlyForActiveView)
+    }
+
     /// Human-readable label for the hourly strip.
     var hourlyLabel: String {
         guard let idx = selectedDayIndex, idx > 0, let day = selectedDay else {

@@ -114,7 +114,7 @@ extension CurrentWeather {
 // MARK: - RainAnalysis
 extension RainAnalysis {
     enum CodingKeys: String, CodingKey {
-        case type, text, sub, sfSymbol, confidence, minutesUntilRain, minutesUntilClear, chart
+        case type, text, sub, sfSymbol, confidence, minutesUntilRain, minutesUntilClear, chart, severity
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -126,6 +126,9 @@ extension RainAnalysis {
         minutesUntilRain  = try c.decodeIfPresent(Int.self,      forKey: .minutesUntilRain)
         minutesUntilClear = try c.decodeIfPresent(Int.self,      forKey: .minutesUntilClear)
         chart             = try c.decodeIfPresent([RainChartPoint].self, forKey: .chart) ?? []
+        // decodeIfPresent + default so previously cached blobs (written before
+        // this field existed) still decode instead of losing the whole cache.
+        severity          = try c.decodeIfPresent(PrecipSeverity.self, forKey: .severity) ?? .light
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -137,6 +140,7 @@ extension RainAnalysis {
         try c.encodeIfPresent(minutesUntilRain,  forKey: .minutesUntilRain)
         try c.encodeIfPresent(minutesUntilClear, forKey: .minutesUntilClear)
         try c.encode(chart,             forKey: .chart)
+        try c.encode(severity,          forKey: .severity)
     }
 }
 

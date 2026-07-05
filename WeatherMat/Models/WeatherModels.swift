@@ -135,6 +135,19 @@ struct DailyEntry: Identifiable, Codable {
 // MARK: - Rain Analysis
 enum RainType: String, Codable { case clear, soon, now }
 
+/// Precipitation intensity tier — thresholds match the radar map's own
+/// "kräftig"/"stark" palette steps (RAIN_COLOR_STEPS in RadarProxy/app.py),
+/// so the wording here and the radar legend mean the same thing.
+enum PrecipSeverity: String, Codable {
+    case light, moderate, heavy
+
+    static func severity(forRateMmPerHour rate: Double) -> PrecipSeverity {
+        if rate >= 4.0 { return .heavy }
+        if rate >= 1.8 { return .moderate }
+        return .light
+    }
+}
+
 struct RainAnalysis: Codable {
     let type:               RainType
     let text:               String
@@ -144,6 +157,7 @@ struct RainAnalysis: Codable {
     let minutesUntilRain:   Int?
     let minutesUntilClear:  Int?
     let chart:              [RainChartPoint]
+    let severity:           PrecipSeverity
 }
 
 struct RainChartPoint: Identifiable, Codable {
@@ -151,6 +165,15 @@ struct RainChartPoint: Identifiable, Codable {
     let time:              Date
     let precipitationRate: Double
     let probability:       Double
+}
+
+/// Coarse, hour-level outlook ("will there be real rain/a storm today"),
+/// derived live from hourly data — not persisted, so no cache-migration
+/// concerns like RainAnalysis has.
+struct HourlyOutlook: Equatable {
+    let text:           String
+    let severity:       PrecipSeverity
+    let isThunderstorm: Bool
 }
 
 // MARK: - Confidence

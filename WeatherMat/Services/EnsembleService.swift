@@ -477,7 +477,7 @@ final class EnsembleService: Sendable {
             return .init(type: .clear, text: "Kein Regen erwartet", sub: "",
                          sfSymbol: "sun.max.fill", confidence: confidence,
                          minutesUntilRain: nil, minutesUntilClear: nil,
-                         chart: chart)
+                         chart: chart, severity: .light)
         }
         // Currently raining?
         let currentIndex = slots.lastIndex { $0.time <= now }
@@ -489,10 +489,18 @@ final class EnsembleService: Sendable {
             let sub = curRate > 0
                 ? String(format: "%.1f mm/h", curRate)
                 : "\(Int(cur.precipProbability))% Wahrscheinlichkeit"
-            return .init(type: .now, text: "Regnet gerade\(sfx)", sub: sub,
-                         sfSymbol: "cloud.rain.fill", confidence: confidence,
+            let severity = PrecipSeverity.severity(forRateMmPerHour: curRate)
+            let text: String
+            switch severity {
+            case .light:    text = "Regnet gerade\(sfx)"
+            case .moderate: text = "Kräftiger Regen gerade\(sfx)"
+            case .heavy:    text = "Starker Regen gerade\(sfx)"
+            }
+            return .init(type: .now, text: text, sub: sub,
+                         sfSymbol: severity == .heavy ? "cloud.heavyrain.fill" : "cloud.rain.fill",
+                         confidence: confidence,
                          minutesUntilRain: 0, minutesUntilClear: nil,
-                         chart: chart)
+                         chart: chart, severity: severity)
         }
         // Upcoming rain
         for (index, slot) in slots.enumerated()
@@ -500,11 +508,23 @@ final class EnsembleService: Sendable {
                 && slot.time <= now.addingTimeInterval(2 * 3_600)
                 && (precipRateMmPerHour(in: slots, at: index) > 0.2 || slot.precipProbability > 60) {
             let mins = max(1, Int(slot.time.timeIntervalSince(now) / 60))
-            return .init(type: .soon, text: "Regen in \(mins) Minuten\(sfx)",
+            let severity = PrecipSeverity.severity(forRateMmPerHour: precipRateMmPerHour(in: slots, at: index))
+            let text: String
+            switch severity {
+            case .light:    text = "Regen in \(mins) Minuten\(sfx)"
+            case .moderate: text = "Kräftiger Regen in \(mins) Minuten\(sfx)"
+            case .heavy:    text = "Starker Regen in \(mins) Minuten\(sfx)"
+            }
+            let symbol = switch severity {
+            case .light:    "cloud.drizzle.fill"
+            case .moderate: "cloud.rain.fill"
+            case .heavy:    "cloud.heavyrain.fill"
+            }
+            return .init(type: .soon, text: text,
                          sub: "\(Int(slot.precipProbability))% Wahrscheinlichkeit",
-                         sfSymbol: "cloud.drizzle.fill", confidence: confidence,
+                         sfSymbol: symbol, confidence: confidence,
                          minutesUntilRain: mins, minutesUntilClear: nil,
-                         chart: chart)
+                         chart: chart, severity: severity)
         }
         // Rain stopping
         if let stopIdx = slots.indices.first(where: {
@@ -515,13 +535,46 @@ final class EnsembleService: Sendable {
                 return .init(type: .clear, text: "Regen hört in \(mins) min auf\(sfx)", sub: "",
                              sfSymbol: "cloud.sun.fill", confidence: confidence,
                              minutesUntilRain: nil, minutesUntilClear: mins,
-                             chart: chart)
+                             chart: chart, severity: .light)
             }
         }
         return .init(type: .clear, text: "Kein Regen in den nächsten 2 Stunden", sub: "",
                      sfSymbol: "sun.max.fill", confidence: confidence,
                      minutesUntilRain: nil, minutesUntilClear: nil,
-                     chart: chart)
+                     chart: chart, severity: .light)
+    }
+
+    /// Coarser, hour-level counterpart to `analyzeRain`: answers "will there be
+    /// *real* rain or a thunderstorm in this window", not "is there any trace
+    /// of precipitation". Deliberately silent (returns nil) for anything at or
+    /// below light rain — that case is already covered by the near-term
+    /// RainBannerView, and repeating "nothing much happening" on every calm
+    /// day would just be noise.
+    static func hourlyOutlook(hourly: [HourlyEntry], now: Date = Date()) -> HourlyOutlook? {
+        let hours = hourly
+            .filter { $0.time >= now.addingTimeInterval(-1_800) }
+            .sorted { $0.time < $1.time }
+        guard !hours.isEmpty else { return nil }
+
+        let isThunderstorm: (HourlyEntry) -> Bool = { [95, 96, 99].contains($0.condition.code) }
+        let isNotable: (HourlyEntry) -> Bool = {
+            isThunderstorm($0) || PrecipSeverity.severity(forRateMmPerHour: $0.precipitationMm) != .light
+        }
+
+        guard let firstNotableIndex = hours.firstIndex(where: isNotable) else { return nil }
+        let entry = hours[firstNotableIndex]
+        let timeLabel = entry.time.formatted(.dateTime.hour().minute().locale(.init(identifier: "de_DE")))
+        let severity = PrecipSeverity.severity(forRateMmPerHour: entry.precipitationMm)
+        let isFirstHour = firstNotableIndex == 0
+
+        if isThunderstorm(entry) {
+            let text = isFirstHour ? "Gewitter möglich" : "Gewitter ab \(timeLabel) möglich"
+            return HourlyOutlook(text: text, severity: .heavy, isThunderstorm: true)
+        }
+
+        let intensityWord = severity == .heavy ? "Starker Regen" : "Kräftiger Regen"
+        let text = isFirstHour ? "\(intensityWord) möglich" : "Trocken bis \(timeLabel), danach \(intensityWord.lowercased())"
+        return HourlyOutlook(text: text, severity: severity, isThunderstorm: false)
     }
 
     private func rainChart(from slots: [ModelMinutelyPoint], now: Date) -> [RainChartPoint] {
@@ -573,7 +626,8 @@ extension EnsembleWeatherData {
                           sunrise: Date(), sunset: Date(), uvMax: 0, windMax: 0, sunshineDuration: 0),
         hourly: [], daily: [],
         rain: RainAnalysis(type: .clear, text: "", sub: "", sfSymbol: "sun.max.fill",
-                           confidence: .medium, minutesUntilRain: nil, minutesUntilClear: nil, chart: []),
+                           confidence: .medium, minutesUntilRain: nil, minutesUntilClear: nil, chart: [],
+                           severity: .light),
         warnings: [], agreementPct: 0, confidence: .medium, confidenceBands: [], activeModels: []
     )
 }

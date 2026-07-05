@@ -32,13 +32,32 @@ struct RainBannerView: View {
         showsOnlyChartSignal ? "cloud.drizzle.fill" : rain.sfSymbol
     }
 
+    /// Severity accent, matching the radar map's own "kräftig"/"stark" colours
+    /// (RadarLegendStep) — same visual language, same meaning, across the app.
+    private var severityTint: Color? {
+        guard !showsOnlyChartSignal else { return nil }
+        switch rain.severity {
+        case .light:    return nil
+        case .moderate: return Color(hex: "#f28c28")
+        case .heavy:    return Color(hex: "#d93025")
+        }
+    }
+
     private var banner: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Image(systemName: displaySymbol)
-                    .symbolRenderingMode(.multicolor)
-                    .font(.system(size: 26))
-                    .symbolEffect(.pulse.byLayer, options: .repeating, isActive: rain.type == .now && !reduceMotion)
+                Group {
+                    if let severityTint {
+                        Image(systemName: displaySymbol)
+                            .symbolRenderingMode(.monochrome)
+                            .foregroundStyle(severityTint)
+                    } else {
+                        Image(systemName: displaySymbol)
+                            .symbolRenderingMode(.multicolor)
+                    }
+                }
+                .font(.system(size: 26))
+                .symbolEffect(.pulse.byLayer, options: .repeating, isActive: rain.type == .now && !reduceMotion)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(displayText)
