@@ -123,13 +123,11 @@ struct RadarLegendView: View {
         guard !isFallbackSource, currentFrame?.sourceKind == .iconEuRaw else { return nil }
         var text = "Modell-Frames sind ein einzelner Lauf; Gewitter können zeitlich oder örtlich abweichen."
         if let referenceTime = currentFrame?.referenceTime {
-            let run = referenceTime.formatted(
-                .dateTime
-                    .hour()
-                    .minute()
-                    .timeZone(TimeZone(secondsFromGMT: 0)!)
-                    .locale(.init(identifier: "de_DE"))
-            )
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "de_DE")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "HH:mm"
+            let run = formatter.string(from: referenceTime)
             text += " Modelllauf: \(run) UTC."
         }
         return text
