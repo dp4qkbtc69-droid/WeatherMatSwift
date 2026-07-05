@@ -1,6 +1,8 @@
 import os
 import sys
 import unittest
+import gzip
+import json
 from datetime import datetime, timezone
 
 import numpy as np
@@ -144,6 +146,46 @@ class RadarCoreTests(unittest.TestCase):
     def test_tile_math_clamps_world_bounds(self) -> None:
         self.assertEqual(app._lon_lat_to_tile(-180, 85.2, 2), (0, 0))
         self.assertEqual(app._lon_lat_to_tile(180, -85.2, 2), (3, 3))
+
+    def test_region_sampler_uses_linear_radar_bbox_mapping(self) -> None:
+        source = np.arange(100, dtype=np.float32).reshape((10, 10))
+        west, south, east, north = app.RADAR_BBOX
+        lon = (west + east) / 2.0
+        lat = (south + north) / 2.0
+        mercator = app._region_mercator_rect(lat, lon, 20.0)
+
+        sampled = app._sample_region_grid(source, mercator, 8)
+
+        self.assertEqual(sampled.shape, (8, 8))
+        self.assertGreater(sampled.mean(), source[3:7, 3:7].min())
+        self.assertLess(sampled.mean(), source[3:7, 3:7].max())
+
+    def test_region_pack_header_offsets_roundtrip(self) -> None:
+        time = datetime(2026, 7, 5, 10, tzinfo=timezone.utc)
+        rain = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
+        snow = np.full((app.GRID_HEIGHT, app.GRID_WIDTH), 0.5, dtype=np.float32)
+        frame = app.RadarFrame(
+            frame_id="DE1200_RV2607051000_000",
+            time=time,
+            is_forecast=False,
+            image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+            rain=rain,
+            snow=snow,
+            precipitation_type="mixed",
+        )
+        cache = app.RadarCache(loaded_at=1.0, frames=[frame], tile_cache={})
+
+        packed = app._build_region_pack(cache, 50.0, 9.0, 130.0, 16)
+        decoded = gzip.decompress(packed)
+        header_raw, payload = decoded.split(b"\n", 1)
+        header = json.loads(header_raw.decode("utf-8"))
+
+        self.assertEqual(header["grid"], {"w": 16, "h": 16})
+        self.assertEqual(header["frames"][0]["offsetBytes"], 0)
+        self.assertEqual(header["frames"][0]["snowOffsetBytes"], 256)
+        self.assertEqual(len(payload), 512)
+        self.assertEqual(payload[0], 5)
+        self.assertEqual(payload[256], 2)
 
     def _frame(self, frame_id: str, time: datetime, is_forecast: bool) -> app.RadarFrame:
         return app.RadarFrame(
