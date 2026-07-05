@@ -96,6 +96,7 @@ struct RadarV2MapView: UIViewRepresentable {
     /// Fired on tap/pan/zoom — the screen uses this to bring back
     /// auto-hidden chrome.
     var onUserInteraction: (() -> Void)? = nil
+    var onRegionSettled: ((CLLocationCoordinate2D, MKMapRect) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -129,6 +130,7 @@ struct RadarV2MapView: UIViewRepresentable {
         }
 
         context.coordinator.onUserInteraction = onUserInteraction
+        context.coordinator.onRegionSettled = onRegionSettled
         context.coordinator.update(
             request,
             regionRenderSet: regionRenderSet,
@@ -141,6 +143,7 @@ struct RadarV2MapView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
         var onUserInteraction: (() -> Void)?
+        var onRegionSettled: ((CLLocationCoordinate2D, MKMapRect) -> Void)?
 
         @objc func handleMapTap() {
             onUserInteraction?()
@@ -197,7 +200,6 @@ struct RadarV2MapView: UIViewRepresentable {
             } else if shouldSuppressTileFallback(for: request, in: mapView) {
                 clearTileRadar(in: mapView)
             } else {
-                clearRegionRadar(in: mapView)
                 updateTileOverlay(for: request, in: mapView)
                 prewarmNativeTiles(for: request, in: mapView)
             }
@@ -216,11 +218,13 @@ struct RadarV2MapView: UIViewRepresentable {
                         } else if self.shouldSuppressTileFallback(for: request, in: mapView) {
                             self.clearTileRadar(in: mapView)
                         } else {
-                            self.clearRegionRadar(in: mapView)
                             self.prewarmNativeTiles(for: request, in: mapView)
                         }
+                        self.onRegionSettled?(mapView.region.center, mapView.visibleMapRect)
                     }
                 }
+            } else {
+                onRegionSettled?(mapView.region.center, mapView.visibleMapRect)
             }
         }
 
@@ -400,9 +404,12 @@ struct RadarV2MapView: UIViewRepresentable {
             CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
             oldRenderer?.alpha = 0
             nextRenderer.alpha = 0.84
-            CATransaction.setCompletionBlock { [weak mapView, weak oldOverlay] in
-                guard let mapView, let oldOverlay else { return }
-                mapView.removeOverlay(oldOverlay)
+            CATransaction.setCompletionBlock { [weak self, weak mapView, weak oldOverlay] in
+                guard let mapView else { return }
+                if let oldOverlay {
+                    mapView.removeOverlay(oldOverlay)
+                }
+                self?.clearRegionRadar(in: mapView)
             }
             CATransaction.commit()
         }
@@ -446,7 +453,7 @@ struct RadarV2MapView: UIViewRepresentable {
     }
 }
 
-private extension MKMapRect {
+extension MKMapRect {
     func regionContains(_ other: MKMapRect) -> Bool {
         minX <= other.minX &&
         minY <= other.minY &&

@@ -46,9 +46,9 @@ enum RadarRegionImageRenderer {
         guard width > 0, height > 0, frame.intensity.count == cellCount else { return nil }
 
         var rgba = [UInt8](repeating: 0, count: cellCount * 4)
-        paint(frame.intensity, into: &rgba, pack: pack, palette: pack.palette.rain, replace: true)
+        paint(frame.intensity, into: &rgba, scale: pack.scale, minimumIntensity: pack.minIntensity, palette: pack.palette.rain, replace: true)
         if let snow = frame.snow, snow.count == cellCount {
-            paint(snow, into: &rgba, pack: pack, palette: pack.palette.snow, replace: false)
+            paint(snow, into: &rgba, scale: pack.scale, minimumIntensity: nil, palette: pack.palette.snow, replace: false)
         }
         featherAlpha(&rgba, width: width, height: height, radius: pack.featherRadius)
 
@@ -72,14 +72,22 @@ enum RadarRegionImageRenderer {
     private static func paint(
         _ quantized: [UInt8],
         into rgba: inout [UInt8],
-        pack: RadarRegionPack,
+        scale: Double,
+        minimumIntensity: Double?,
         palette: [RadarPaletteStep],
         replace: Bool
     ) {
-        guard let first = palette.first, pack.scale > 0 else { return }
+        guard let first = palette.first, scale > 0 else { return }
         for index in quantized.indices {
-            let intensity = Double(quantized[index]) / pack.scale
-            guard intensity >= pack.minIntensity, intensity >= first.lower else {
+            let intensity = Double(quantized[index]) / scale
+            if let minimumIntensity, intensity < minimumIntensity {
+                if replace {
+                    let base = index * 4
+                    rgba[base + 3] = 0
+                }
+                continue
+            }
+            guard intensity >= first.lower else {
                 if replace {
                     let base = index * 4
                     rgba[base + 3] = 0

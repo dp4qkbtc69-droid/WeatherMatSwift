@@ -12,6 +12,17 @@ private struct RegionFrameRenderPlan: Sendable {
     let readinessFrameIDs: [String: String]
 }
 
+private struct RegionPackRequest {
+    let center: CLLocationCoordinate2D
+    let kilometers: Double
+
+    func isClose(to nextCenter: CLLocationCoordinate2D, kilometers nextKilometers: Double) -> Bool {
+        abs(center.latitude - nextCenter.latitude) < 0.08 &&
+        abs(center.longitude - nextCenter.longitude) < 0.08 &&
+        abs(kilometers - nextKilometers) < 20
+    }
+}
+
 struct RainRadarCardView: View {
     let location: SavedLocation?
     let rain: RainAnalysis
@@ -89,6 +100,7 @@ struct RainRadarScreen: View {
     @State private var regionRenderSet: RadarRegionRenderSet?
     @State private var isRegionPackLoading = false
     @State private var regionPackTask: Task<Void, Never>?
+    @State private var lastRequestedRegionPack: RegionPackRequest?
     @State private var showsLegend = false
     @State private var noticeText: String?
     // Chrome visibility state: header + rail hide after inactivity during
@@ -132,7 +144,10 @@ struct RainRadarScreen: View {
                 timelineFrame: store.selectedFrame,
                 isPlaying: store.isPlaying,
                 userCoordinate: userCoordinate,
-                onUserInteraction: { registerInteraction() }
+                onUserInteraction: { registerInteraction() },
+                onRegionSettled: { center, visibleMapRect in
+                    handleMapRegionSettled(center: center, visibleMapRect: visibleMapRect)
+                }
             )
             .ignoresSafeArea()
 
@@ -260,19 +275,27 @@ struct RainRadarScreen: View {
 
     @MainActor
     private func loadRegionPackIfPossible() async {
+        let center = userCoordinate ?? mapRegion.center
+        await loadRegionPack(center: center, kilometers: Self.localRegionPackKilometers, keepsExistingOverlay: false)
+    }
+
+    @MainActor
+    private func loadRegionPack(center: CLLocationCoordinate2D, kilometers: Double, keepsExistingOverlay: Bool) async {
         regionPackTask?.cancel()
-        regionRenderSet = nil
-        isRegionPackLoading = false
-        guard let location else { return }
-        let latitude = location.latitude
-        let longitude = location.longitude
+        if !keepsExistingOverlay {
+            regionRenderSet = nil
+        }
+        let latitude = center.latitude
+        let longitude = center.longitude
+        let kilometers = min(400, max(40, kilometers))
+        lastRequestedRegionPack = RegionPackRequest(center: center, kilometers: kilometers)
         isRegionPackLoading = true
         regionPackTask = Task {
             do {
                 let pack = try await RegionPackService.fetchRegionPack(
                     latitude: latitude,
                     longitude: longitude,
-                    km: Self.localRegionPackKilometers
+                    km: kilometers
                 )
                 for _ in 0..<20 {
                     let hasSelectedFrame = await MainActor.run { store.selectedFrame != nil }
@@ -306,11 +329,48 @@ struct RainRadarScreen: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    regionRenderSet = nil
+                    if !keepsExistingOverlay {
+                        regionRenderSet = nil
+                    }
                     isRegionPackLoading = false
+                    lastRequestedRegionPack = nil
                 }
             }
         }
+    }
+
+    @MainActor
+    private func handleMapRegionSettled(center: CLLocationCoordinate2D, visibleMapRect: MKMapRect) {
+        guard store.timeline?.source == .dwd else { return }
+        guard visibleMapRect.width > 0, visibleMapRect.height > 0 else { return }
+        let desiredKilometers = desiredRegionPackKilometers(center: center, visibleMapRect: visibleMapRect)
+        if isRegionPackLoading,
+           let lastRequestedRegionPack,
+           lastRequestedRegionPack.isClose(to: center, kilometers: desiredKilometers) {
+            return
+        }
+        if let regionRenderSet,
+           regionRenderSet.pack.mapRect.regionContains(visibleMapRect),
+           visibleMapRect.width >= regionRenderSet.pack.mapRect.width / 8.0,
+           lastRequestedRegionPack?.isClose(to: center, kilometers: desiredKilometers) != false {
+            return
+        }
+        Task { @MainActor in
+            await loadRegionPack(center: center, kilometers: desiredKilometers, keepsExistingOverlay: true)
+        }
+    }
+
+    private func desiredRegionPackKilometers(center: CLLocationCoordinate2D, visibleMapRect: MKMapRect) -> Double {
+        let visibleKilometers = max(
+            groundKilometers(forMapPoints: visibleMapRect.width, latitude: center.latitude),
+            groundKilometers(forMapPoints: visibleMapRect.height, latitude: center.latitude)
+        )
+        return min(Self.localRegionPackKilometers, max(80, visibleKilometers * 1.8))
+    }
+
+    private func groundKilometers(forMapPoints mapPoints: Double, latitude: Double) -> Double {
+        let mercatorMeters = mapPoints / MKMapSize.world.width * 40_075_016.68557849
+        return mercatorMeters * max(0.15, cos(latitude * .pi / 180.0)) / 1_000.0
     }
 
     @MainActor
