@@ -105,7 +105,7 @@ except ValueError:
     TILE_RENDER_SCALE = 2
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
-APP_VERSION = "smooth-palette-feather-2026-07-05"
+APP_VERSION = "smooth-palette-minintensity-2026-07-05"
 
 # Hybrid rain palette: blue for light/moderate rain, warning colors
 # (yellow/orange/red) from "kraeftig" upwards. Must stay in sync with
@@ -130,6 +130,10 @@ SNOW_COLOR_STEPS = (
 # resolution, so cost is negligible. Env-gated so they can be tuned/reverted.
 SMOOTH_PALETTE = os.environ.get("DWD_RADAR_SMOOTH_PALETTE", "true").lower() in {"1", "true", "yes"}
 FEATHER_RADIUS = float(os.environ.get("DWD_RADAR_FEATHER_RADIUS", "0.8"))
+# Hide precip below this rate (mm/h) — very-light drizzle/virga/clutter is the
+# main source of restless "fades". 0.3 drops the whole very-light class; lower
+# (0.1–0.2) keeps light rain but still declutters. Set 0 to show everything.
+MIN_INTENSITY = float(os.environ.get("DWD_RADAR_MIN_INTENSITY", "0.3"))
 _RAIN_ANCHOR_I = np.array([step[0] for step in RAIN_COLOR_STEPS], dtype=np.float32)
 _RAIN_ANCHOR_C = np.array([step[2] for step in RAIN_COLOR_STEPS], dtype=np.float32)
 _SNOW_ANCHOR_I = np.array([step[0] for step in SNOW_COLOR_STEPS], dtype=np.float32)
@@ -1440,6 +1444,8 @@ def _crop_regular_lat_lon(values: np.ndarray, first_lat: float, last_lat: float,
 
 def _render_icon_raw_image(intensity: np.ndarray, snow_intensity: np.ndarray) -> Image.Image:
     rain = np.maximum(intensity - snow_intensity, 0.0)
+    if MIN_INTENSITY > 0:
+        rain = np.where(rain < MIN_INTENSITY, 0.0, rain)
     if SMOOTH_PALETTE:
         rgba = _ramp_rgba(rain, _RAIN_ANCHOR_I, _RAIN_ANCHOR_C)
         snow_rgba = _ramp_rgba(snow_intensity, _SNOW_ANCHOR_I, _SNOW_ANCHOR_C)
@@ -1785,6 +1791,8 @@ def _render_radar_image(grid: np.ndarray) -> Image.Image:
 
     intensity = np.zeros_like(values, dtype=np.float32)
     intensity[valid] = values[valid].astype(np.float32) / 10.0
+    if MIN_INTENSITY > 0:
+        intensity[intensity < MIN_INTENSITY] = 0.0
 
     if SMOOTH_PALETTE:
         rgba = _ramp_rgba(intensity, _RAIN_ANCHOR_I, _RAIN_ANCHOR_C)

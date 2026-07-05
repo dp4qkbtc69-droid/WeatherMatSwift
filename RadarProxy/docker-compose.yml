@@ -48,6 +48,9 @@ services:
       # Optics: continuous colour ramp instead of hard bands + edge feathering.
       DWD_RADAR_SMOOTH_PALETTE: "${DWD_RADAR_SMOOTH_PALETTE:-true}"
       DWD_RADAR_FEATHER_RADIUS: "${DWD_RADAR_FEATHER_RADIUS:-0.8}"
+      # Hide precip below this rate (mm/h). 0.3 drops the very-light class to
+      # calm the view; lower keeps light rain; 0 shows everything.
+      DWD_RADAR_MIN_INTENSITY: "${DWD_RADAR_MIN_INTENSITY:-0.3}"
       APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
       APNS_KEY_ID: "${APNS_KEY_ID:-}"
       APNS_KEY_PATH: "/apns/AuthKey.p8"
