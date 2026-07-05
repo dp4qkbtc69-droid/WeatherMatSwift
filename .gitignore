@@ -6,3 +6,5 @@ RadarProxy/.env.*
 *.xcuserstate
 xcuserdata/
 *.xcscmblueprint
+/build/
+/tmp/

@@ -81,13 +81,51 @@ docker compose logs -f caddy
 
 ## Endpoints
 
-- `GET /health`
-- `GET /timeline.json`
-- `GET /tiles/{frame_id}/{z}/{x}/{y}.png`
+- `GET /health`, `GET /metrics`
+- `GET /timeline.json` — frame list (native DWD-RV nowcast + ICON-EU raw
+  forecast), each frame's `source`, `precipitationType`, and (for model
+  frames) `referenceTime` of the model run.
+- `GET /tiles/{frame_id}/{z}/{x}/{y}.png` — server-rendered tiles (tile
+  pipeline; kept as a fallback outside the packed region / at deep zoom).
+- `GET /region-pack?lat=&lon=&km=&frames=all` — compact gzip package of raw
+  intensity rasters (rain + optional snow, quantized uint8) for a local
+  region, plus the colour palette/threshold parameters in the header. The
+  iOS client renders this itself instead of loading tiles per frame — this is
+  what makes radar playback fast (and mostly network-free) on mobile data.
+- `POST /warm-location` / `POST /warm-locations` — register one or many user
+  locations so their detail-zoom tiles and region are pre-warmed.
 
-The proxy refreshes the DWD archive every four minutes.
+The proxy refreshes the DWD archive every `DWD_RADAR_REFRESH_INTERVAL_SECONDS`
+(default 300s / 5 min).
 
-Optional environment variables:
+### Rendering & optics
+
+- `DWD_RADAR_SMOOTH_PALETTE` (default `true`) — continuous colour ramp
+  interpolated over `RAIN_COLOR_STEPS`/`SNOW_COLOR_STEPS` instead of hard
+  bands. Palette is a conventional rainbow (cyan → green → yellow → orange →
+  red → magenta) so in-between hues stay meaningful.
+- `DWD_RADAR_MIN_INTENSITY` (default `0.3` mm/h) — hides precip below this
+  rate (drizzle/virga/clutter) to declutter the view.
+- `DWD_RADAR_FEATHER_RADIUS` (default `0.8`) — softens precip-area edges
+  (alpha-channel blur).
+- `DWD_RADAR_HANDOFF_MINUTES` (default `60`) — linearly blends the first
+  ICON-EU model frames against the last DWD-RV nowcast field over this many
+  minutes, so the nowcast→model handoff isn't an abrupt jump. `0` disables it.
+- `DWD_RADAR_REGION_GRID_SIZE` (default `384`), `DWD_RADAR_REGION_QUANT_SCALE`
+  (default `5.0`) — region-pack raster resolution and intensity quantization.
+
+### Pre-warming
+
+- `DWD_RADAR_WARM_TILES`/`DWD_RADAR_WARM_WORKERS` (default `1`, keep at 1 on a
+  2-core box — parallel warming starves live playback requests),
+  `DWD_RADAR_WARM_FRAME_LIMIT`/`_ZOOMS`/`_DETAIL_*` — background tile warming.
+- `DWD_RADAR_HOTSPOT_WARM`, `DWD_RADAR_HOTSPOT_DETAIL_ZOOMS`/`_HALF_KM` — warm
+  the app's local open-view detail zooms around each hotspot (static
+  `DWD_RADAR_HOTSPOT_LAT`/`LON` plus dynamic ones from `/warm-location(s)`,
+  capped at `DWD_RADAR_DYNAMIC_HOTSPOTS_MAX`, default 16, persisted to
+  `HOTSPOTS_STATE_PATH` so they survive a restart).
+
+### Other
 
 - `DWD_RADAR_PAST_HOURS`, default `24`
 - `DWD_RADAR_PAST_STEP_MINUTES`, default `15`

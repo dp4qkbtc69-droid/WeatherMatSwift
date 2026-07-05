@@ -51,6 +51,14 @@ services:
       # Hide precip below this rate (mm/h). 0.3 drops the very-light class to
       # calm the view; lower keeps light rain; 0 shows everything.
       DWD_RADAR_MIN_INTENSITY: "${DWD_RADAR_MIN_INTENSITY:-0.3}"
+      # Region-pack (client-side rendering): output raster size and intensity
+      # quantization scale (mm/h * scale, clamped to uint8).
+      DWD_RADAR_REGION_GRID_SIZE: "${DWD_RADAR_REGION_GRID_SIZE:-384}"
+      DWD_RADAR_REGION_QUANT_SCALE: "${DWD_RADAR_REGION_QUANT_SCALE:-5.0}"
+      # Linearly blend the first ICON-EU model frames against the last DWD-RV
+      # nowcast field over this many minutes, so the nowcast->model handoff
+      # isn't an abrupt jump. 0 disables blending.
+      DWD_RADAR_HANDOFF_MINUTES: "${DWD_RADAR_HANDOFF_MINUTES:-60}"
       APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
       APNS_KEY_ID: "${APNS_KEY_ID:-}"
       APNS_KEY_PATH: "/apns/AuthKey.p8"
