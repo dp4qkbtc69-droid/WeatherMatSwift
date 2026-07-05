@@ -4,6 +4,7 @@ import unittest
 import gzip
 import json
 import math
+import tempfile
 from datetime import datetime, timezone
 
 import numpy as np
@@ -198,6 +199,50 @@ class RadarCoreTests(unittest.TestCase):
         self.assertEqual(len(payload), 512)
         self.assertEqual(payload[0], 5)
         self.assertEqual(payload[256], 2)
+
+    def test_dwd_rv_forecast_frames_keep_distinct_cache_and_pack_keys(self) -> None:
+        rain_a = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
+        rain_b = np.full((app.GRID_HEIGHT, app.GRID_WIDTH), 2.0, dtype=np.float32)
+        time_a, forecast_a = app._time_from_name("DE1200_RV2607051310_010")
+        time_b, forecast_b = app._time_from_name("DE1200_RV2607051310_030")
+        frame_a = app.RadarFrame(
+            frame_id="DE1200_RV2607051310_010",
+            time=time_a,
+            is_forecast=forecast_a,
+            image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+            rain=rain_a,
+        )
+        frame_b = app.RadarFrame(
+            frame_id="DE1200_RV2607051310_030",
+            time=time_b,
+            is_forecast=forecast_b,
+            image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+            rain=rain_b,
+        )
+
+        self.assertNotEqual(frame_a.frame_id, frame_b.frame_id)
+        self.assertNotEqual(frame_a.time, frame_b.time)
+        self.assertNotEqual((frame_a.frame_id, 8, 134, 88), (frame_b.frame_id, 8, 134, 88))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_dir = app.DISK_CACHE_DIR
+            try:
+                app.DISK_CACHE_DIR = app.Path(tmp)
+                self.assertNotEqual(
+                    app._disk_tile_path(frame_a.frame_id, 8, 134, 88),
+                    app._disk_tile_path(frame_b.frame_id, 8, 134, 88),
+                )
+            finally:
+                app.DISK_CACHE_DIR = old_dir
+
+        cache = app.RadarCache(loaded_at=1.0, frames=[frame_a, frame_b], tile_cache={})
+        packed = app._build_region_pack(cache, 49.0, 8.4, 80.0, 16)
+        header_raw, _ = gzip.decompress(packed).split(b"\n", 1)
+        header = json.loads(header_raw.decode("utf-8"))
+        self.assertEqual(
+            [frame["id"] for frame in header["frames"]],
+            ["DE1200_RV2607051310_010", "DE1200_RV2607051310_030"],
+        )
 
     def _frame(self, frame_id: str, time: datetime, is_forecast: bool) -> app.RadarFrame:
         return app.RadarFrame(

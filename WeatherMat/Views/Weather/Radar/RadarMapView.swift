@@ -377,7 +377,8 @@ struct RadarV2MapView: UIViewRepresentable {
             guard suppressesTilePrefetch, request.source == .dwd else { return false }
             guard let regionRenderSet else { return true }
             return regionRenderSet.pack.mapRect.regionContains(mapView.visibleMapRect) &&
-                mapView.visibleMapRect.width >= regionRenderSet.pack.mapRect.width / 8.0
+                mapView.visibleMapRect.width >= regionRenderSet.pack.mapRect.width / 8.0 &&
+                regionRenderSet.image(for: request.frame) != nil
         }
 
         private func prewarmNativeTiles(for request: RadarV2RenderRequest, in mapView: MKMapView) {
