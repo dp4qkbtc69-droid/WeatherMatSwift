@@ -83,6 +83,12 @@ HOTSPOT_LAT = float(os.environ.get("DWD_RADAR_HOTSPOT_LAT", "50.088"))
 HOTSPOT_LON = float(os.environ.get("DWD_RADAR_HOTSPOT_LON", "9.064"))
 HOTSPOT_RADIUS_TILES = int(os.environ.get("DWD_RADAR_HOTSPOT_RADIUS_TILES", "1"))
 HOTSPOT_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_ZOOMS", "8,9").split(",") if item.strip())
+# Detail zooms warmed only around the hotspots (not the whole bbox), covering
+# the app's local open view (~z8) so playback there is served from cache
+# instead of rendering ~18 tiles per frame on demand.
+HOTSPOT_DETAIL_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_ZOOMS", "7,8,9").split(",") if item.strip())
+HOTSPOT_DETAIL_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT", "96"))
+HOTSPOT_DETAIL_HALF_KM = float(os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_HALF_KM", "75"))
 RADAR_PROXY_TOKEN = os.environ.get("RADAR_PROXY_TOKEN") or os.environ.get("WEATHERMAT_RADAR_TOKEN") or ""
 DISK_CACHE_DIR = Path(os.environ["RADAR_DISK_CACHE_DIR"]) if os.environ.get("RADAR_DISK_CACHE_DIR") else None
 TILE_SIZE = 512
@@ -956,6 +962,7 @@ def _warm_tiles_background(cache: RadarCache, cache_id: float) -> None:
         "frames": 0,
     }
 
+    hotspot_points = _all_hotspot_points()
     try:
         for frame_index, frame in enumerate(cache.frames[:max(1, WARM_FRAME_LIMIT)]):
             zooms = list(WARM_ZOOMS)
@@ -968,6 +975,21 @@ def _warm_tiles_background(cache: RadarCache, cache_id: float) -> None:
                         rendered += 1
                     else:
                         reused += 1
+            # Local detail: warm the higher zooms only around the hotspots so
+            # the app's ~z8 open view plays back from cache.
+            if HOTSPOT_WARM and frame_index < HOTSPOT_DETAIL_FRAME_LIMIT:
+                seen: set = set()
+                for z in HOTSPOT_DETAIL_ZOOMS:
+                    for lat, lon in hotspot_points:
+                        for x, y in _hotspot_view_tile_paths(z, lat, lon, HOTSPOT_DETAIL_HALF_KM):
+                            if (z, x, y) in seen:
+                                continue
+                            seen.add((z, x, y))
+                            _, did_render = _tile_bytes(cache, frame, z, x, y)
+                            if did_render:
+                                rendered += 1
+                            else:
+                                reused += 1
             warmed_frames += 1
     except Exception as error:
         logger.error("tile warm failed: %s", error)
@@ -1017,6 +1039,27 @@ def _hotspot_tile_paths(z: int, lat: float = HOTSPOT_LAT, lon: float = HOTSPOT_L
         for x in range(max(0, center_x - radius), min(tile_count - 1, center_x + radius) + 1)
         for y in range(max(0, center_y - radius), min(tile_count - 1, center_y + radius) + 1)
     ]
+
+
+def _hotspot_view_tile_paths(z: int, lat: float, lon: float, half_km: float) -> List[Tuple[int, int]]:
+    """Tiles covering a ~`half_km` box around a point — tight enough that
+    warming higher zooms stays cheap (a handful of tiles per hotspot)."""
+    dlat = half_km / 111.0
+    dlon = half_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
+    x0, y0 = _lon_lat_to_tile(lon - dlon, lat + dlat, z)
+    x1, y1 = _lon_lat_to_tile(lon + dlon, lat - dlat, z)
+    return [
+        (x, y)
+        for x in range(min(x0, x1), max(x0, x1) + 1)
+        for y in range(min(y0, y1), max(y0, y1) + 1)
+    ]
+
+
+def _all_hotspot_points() -> List[Tuple[float, float]]:
+    points = [(round(HOTSPOT_LAT, 4), round(HOTSPOT_LON, 4))]
+    with _dynamic_hotspots_lock:
+        points.extend((round(lat, 4), round(lon, 4)) for lat, lon in _dynamic_hotspots)
+    return list(dict.fromkeys(points))
 
 
 def _lon_lat_to_tile(lon: float, lat: float, z: int) -> Tuple[int, int]:

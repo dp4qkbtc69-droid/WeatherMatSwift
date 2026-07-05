@@ -33,6 +33,11 @@ services:
       DWD_RADAR_HOTSPOT_LON: "${DWD_RADAR_HOTSPOT_LON:-9.064}"
       DWD_RADAR_HOTSPOT_RADIUS_TILES: "${DWD_RADAR_HOTSPOT_RADIUS_TILES:-1}"
       DWD_RADAR_HOTSPOT_ZOOMS: "${DWD_RADAR_HOTSPOT_ZOOMS:-7,8,9,10,11,12}"
+      # Warm the app's local open-view detail zooms (~z8) around every hotspot,
+      # for all frames, so radar playback at the default zoom is cache-served.
+      DWD_RADAR_HOTSPOT_DETAIL_ZOOMS: "${DWD_RADAR_HOTSPOT_DETAIL_ZOOMS:-7,8,9}"
+      DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT: "${DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT:-96}"
+      DWD_RADAR_HOTSPOT_DETAIL_HALF_KM: "${DWD_RADAR_HOTSPOT_DETAIL_HALF_KM:-75}"
       APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
       APNS_KEY_ID: "${APNS_KEY_ID:-}"
       APNS_KEY_PATH: "/apns/AuthKey.p8"

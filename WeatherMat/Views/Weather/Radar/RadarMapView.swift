@@ -385,7 +385,10 @@ struct RadarV2TilePrefetchPlan {
 
         let zoomScale = Double(mapView.bounds.width) / mapRect.width
         let visibleZoom = min(max(Int(floor(log2(zoomScale) + 20.0)), 3), min(request.tileMaxZoom, 18))
-        let zooms = Array(Set([visibleZoom, max(3, visibleZoom - 1), min(request.tileMaxZoom, visibleZoom + 1)])).sorted()
+        // Prefetch the displayed zoom and one coarser level only. The finer
+        // visibleZoom+1 level costs 4× the tiles for a zoom the user isn't
+        // viewing yet and slows frame readiness during playback.
+        let zooms = Array(Set([visibleZoom, max(3, visibleZoom - 1)])).sorted()
         let frames = [request.frame] + request.neighborFrames
 
         var groups: [RadarV2FrameURLGroup] = []
