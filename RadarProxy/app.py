@@ -1028,7 +1028,11 @@ def _palette_json(steps: Tuple[Tuple[float, float, Tuple[int, int, int, int]], .
 
 def _region_mercator_rect(lat: float, lon: float, km: float) -> Tuple[float, float, float, float]:
     center_x, center_y = _lon_lat_to_mercator(lon, lat)
-    half = km * 1000.0 / 2.0
+    # `km` is a ground distance. Web-Mercator units stretch by sec(latitude),
+    # so expand the meter span here; otherwise a 130 km request around 50N
+    # covers only about 84 km on the ground and misses the app's opening view.
+    scale = 1.0 / max(0.15, math.cos(math.radians(max(-85.0, min(85.0, lat)))))
+    half = km * 1000.0 * scale / 2.0
     return (
         max(-WEB_MERCATOR_LIMIT, center_x - half),
         max(-WEB_MERCATOR_LIMIT, center_y - half),

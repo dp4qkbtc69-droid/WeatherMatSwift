@@ -93,6 +93,7 @@ struct RainRadarScreen: View {
     /// Initial radar view: ~65 km around the location, so the most relevant
     /// tiles load first. The wider map fills in as the user zooms/pans out.
     private static let localSpanMeters: CLLocationDistance = 130_000
+    private static let localRegionPackKilometers: Double = 300
 
     init(location: SavedLocation?) {
         self.location = location
@@ -262,7 +263,7 @@ struct RainRadarScreen: View {
                 let pack = try await RegionPackService.fetchRegionPack(
                     latitude: latitude,
                     longitude: longitude,
-                    km: Self.localSpanMeters / 1_000.0
+                    km: Self.localRegionPackKilometers
                 )
                 let renderSet = await RadarRegionImageRenderer.renderAll(pack: pack)
                 guard !Task.isCancelled else { return }

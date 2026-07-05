@@ -3,6 +3,7 @@ import sys
 import unittest
 import gzip
 import json
+import math
 from datetime import datetime, timezone
 
 import numpy as np
@@ -159,6 +160,17 @@ class RadarCoreTests(unittest.TestCase):
         self.assertEqual(sampled.shape, (8, 8))
         self.assertGreater(sampled.mean(), source[3:7, 3:7].min())
         self.assertLess(sampled.mean(), source[3:7, 3:7].max())
+
+    def test_region_mercator_rect_interprets_km_as_ground_distance(self) -> None:
+        lat = 50.0
+        lon = 9.0
+        rect = app._region_mercator_rect(lat, lon, 130.0)
+        west, _ = app._mercator_to_lon_lat(rect[0], rect[1])
+        east, _ = app._mercator_to_lon_lat(rect[2], rect[3])
+        ground_width_m = (rect[2] - rect[0]) * math.cos(math.radians(lat))
+
+        self.assertAlmostEqual(ground_width_m / 1000.0, 130.0, delta=0.1)
+        self.assertGreater(east - west, 1.7)
 
     def test_region_pack_header_offsets_roundtrip(self) -> None:
         time = datetime(2026, 7, 5, 10, tzinfo=timezone.utc)
