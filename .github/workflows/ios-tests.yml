@@ -1,0 +1,72 @@
+name: iOS tests
+
+on:
+  push:
+    paths:
+      - "WeatherMat/**"
+      - "WeatherMatTests/**"
+      - "WeatherMat.xcodeproj/**"
+      - "project.yml"
+      - ".github/workflows/ios-tests.yml"
+  pull_request:
+    paths:
+      - "WeatherMat/**"
+      - "WeatherMatTests/**"
+      - "WeatherMat.xcodeproj/**"
+      - "project.yml"
+      - ".github/workflows/ios-tests.yml"
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare local config
+        run: cp "WeatherMat/LocalConfig.example.plist" "WeatherMat/LocalConfig.plist"
+
+      - name: Select simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import subprocess
+
+          preferred = [
+              "iPhone 16 Pro",
+              "iPhone 15 Pro",
+              "iPhone 17 Pro",
+              "iPhone SE (3rd generation)",
+          ]
+          raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"])
+          devices = json.loads(raw)["devices"]
+          available = [
+              device
+              for runtime_devices in devices.values()
+              for device in runtime_devices
+              if device.get("isAvailable", False)
+          ]
+          by_name = {device["name"]: device for device in available}
+          for name in preferred:
+              if name in by_name:
+                  print(f"name={name}")
+                  break
+          else:
+              phones = [device for device in available if device["name"].startswith("iPhone")]
+              if not phones:
+                  raise SystemExit("No available iPhone simulator found")
+              print("name=" + phones[0]["name"])
+          PY
+
+      - name: Run tests
+        run: |
+          xcodebuild test \
+            -project WeatherMat.xcodeproj \
+            -scheme WeatherMat \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            -derivedDataPath "$RUNNER_TEMP/wm-dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
