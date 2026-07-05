@@ -53,6 +53,7 @@ ICON_FORECAST_HOURS = int(os.environ.get("DWD_ICON_FORECAST_HOURS", "120"))
 ICON_RAW_FORECAST_HOURS = int(os.environ.get("DWD_ICON_RAW_FORECAST_HOURS", "72"))
 ICON_RAW_MAX_FRAMES = int(os.environ.get("DWD_ICON_RAW_MAX_FRAMES", "72"))
 ICON_RAW_STEP_HOURS = int(os.environ.get("DWD_ICON_RAW_STEP_HOURS", "1"))
+RADAR_HANDOFF_MINUTES = max(0, int(os.environ.get("DWD_RADAR_HANDOFF_MINUTES", "60")))
 ICON_RAW_BASE_URL = os.environ.get("DWD_ICON_RAW_BASE_URL", "https://opendata.dwd.de/weather/nwp/icon-eu/grib/")
 DISK_CACHE_MAX_AGE_SECONDS = int(os.environ.get("DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS", "86400"))
 DISK_CACHE_PRUNE_INTERVAL_SECONDS = int(os.environ.get("DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS", "3600"))
@@ -172,7 +173,7 @@ WARNING_POLL_SECONDS = int(os.environ.get("WARNING_POLL_SECONDS", "300"))
 PUSH_STATE_PATH = Path(os.environ.get("PUSH_STATE_PATH", "push_state.json"))
 HOTSPOTS_STATE_PATH = Path(os.environ.get("HOTSPOTS_STATE_PATH", "hotspots.json"))
 _SEVERITY_RANK = {"Minor": 0, "Moderate": 1, "Severe": 2, "Extreme": 3}
-TILE_CACHE_VERSION = os.environ.get("RADAR_TILE_CACHE_VERSION", APP_VERSION)
+TILE_CACHE_VERSION = os.environ.get("RADAR_TILE_CACHE_VERSION", f"{APP_VERSION}|handoff-v1")
 WEB_MERCATOR_LIMIT = 20037508.342789244
 
 # Practical coverage of the DE1200 composite for the legacy raster renderer.
@@ -1389,7 +1390,12 @@ def _download_frames(include_history: bool) -> List[RadarFrame]:
         try:
             blank = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
             after = max((frame.time for frame in combined), default=latest_base)
-            icon_raw = _download_icon_raw_frames(after=after)
+            handoff_from = max(
+                (frame for frame in combined if _frame_source(frame) == "dwd-rv" and frame.rain is not None),
+                key=lambda frame: frame.time,
+                default=None,
+            )
+            icon_raw = _download_icon_raw_frames(after=after, handoff_from=handoff_from)
             if icon_raw:
                 combined.extend(icon_raw)
                 wms_after = max((frame.time for frame in icon_raw), default=after)
@@ -1412,7 +1418,7 @@ def _download_frames(include_history: bool) -> List[RadarFrame]:
     return combined
 
 
-def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
+def _download_icon_raw_frames(after: datetime, handoff_from: RadarFrame | None = None) -> List[RadarFrame]:
     if ICON_RAW_MODE not in {"auto", "raw", "raw-grib", "grib"}:
         return []
     if not _icon_raw_decoder_available():
@@ -1431,6 +1437,7 @@ def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
             cached_frames = list(_icon_raw_cache.get("frames") or [])
             if cached_reference == reference_time and cached_frames:
                 frames = [frame for frame in cached_frames if frame.time > after]
+                frames = _apply_icon_handoff(frames, after, handoff_from)
                 _metric_increment("iconRawCacheHits")
                 _metric_set("lastIconRawRun", f"{run_hour}/{reference_time.isoformat()}")
                 _metric_set("lastIconRawError", None)
@@ -1481,7 +1488,7 @@ def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
             _icon_raw_cache["referenceTime"] = reference_time
             _icon_raw_cache["runHour"] = run_hour
             _icon_raw_cache["frames"] = frames
-        filtered_frames = [frame for frame in frames if frame.time > after]
+        filtered_frames = _apply_icon_handoff([frame for frame in frames if frame.time > after], after, handoff_from)
         _metric_set("lastIconRawRun", f"{run_hour}/{reference_time.isoformat()}")
         _metric_set("lastIconRawError", None)
         _metric_set("iconRawFrames", len(filtered_frames))
@@ -1491,6 +1498,61 @@ def _download_icon_raw_frames(after: datetime) -> List[RadarFrame]:
         _metric_set("lastIconRawError", str(error))
         logger.warning("ICON raw unavailable: %s", error)
         return []
+
+
+def _apply_icon_handoff(frames: List[RadarFrame], after: datetime, handoff_from: RadarFrame | None) -> List[RadarFrame]:
+    if RADAR_HANDOFF_MINUTES <= 0 or handoff_from is None or handoff_from.rain is None:
+        return frames
+    window_seconds = RADAR_HANDOFF_MINUTES * 60.0
+    if window_seconds <= 0:
+        return frames
+
+    blended: List[RadarFrame] = []
+    for frame in frames:
+        if frame.rain is None:
+            blended.append(frame)
+            continue
+        elapsed = (frame.time - after).total_seconds()
+        nowcast_weight = max(0.0, min(1.0, 1.0 - elapsed / window_seconds))
+        if nowcast_weight <= 0.0:
+            blended.append(frame)
+            continue
+
+        model_rain = frame.rain.astype(np.float32)
+        model_snow = frame.snow.astype(np.float32) if frame.snow is not None else np.zeros_like(model_rain)
+        nowcast_rain = _resample_float_grid(handoff_from.rain, model_rain.shape)
+        if handoff_from.snow is not None:
+            nowcast_snow = _resample_float_grid(handoff_from.snow, model_rain.shape)
+        else:
+            nowcast_snow = np.zeros_like(model_rain)
+
+        model_weight = 1.0 - nowcast_weight
+        rain = (nowcast_rain * nowcast_weight + model_rain * model_weight).astype(np.float32)
+        snow = (nowcast_snow * nowcast_weight + model_snow * model_weight).astype(np.float32)
+        total = np.maximum(rain + snow, 0.0).astype(np.float32)
+        precipitation_type = _precipitation_type(total, snow)
+        blended.append(
+            RadarFrame(
+                frame_id=frame.frame_id,
+                time=frame.time,
+                is_forecast=frame.is_forecast,
+                image=_render_icon_raw_image(total, snow),
+                rain=rain,
+                snow=snow,
+                layer_name=frame.layer_name,
+                reference_time=frame.reference_time,
+                precipitation_type=precipitation_type,
+            )
+        )
+    return blended
+
+
+def _resample_float_grid(source: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+    if source.shape == shape:
+        return source.astype(np.float32)
+    image = Image.fromarray(source.astype(np.float32), mode="F")
+    resized = image.resize((shape[1], shape[0]), Image.Resampling.BILINEAR)
+    return np.asarray(resized, dtype=np.float32)
 
 
 def _precipitation_type(intensity: np.ndarray, snow_intensity: np.ndarray) -> str:

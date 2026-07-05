@@ -246,6 +246,44 @@ class RadarCoreTests(unittest.TestCase):
             ["DE1200_RV2607051310_010", "DE1200_RV2607051310_030"],
         )
 
+    def test_icon_handoff_blends_only_inside_window(self) -> None:
+        old_minutes = app.RADAR_HANDOFF_MINUTES
+        try:
+            app.RADAR_HANDOFF_MINUTES = 60
+            after = datetime(2026, 7, 5, 14, tzinfo=timezone.utc)
+            nowcast = app.RadarFrame(
+                frame_id="DE1200_RV2607051310_120",
+                time=after,
+                is_forecast=True,
+                image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+                rain=np.full((2, 2), 2.0, dtype=np.float32),
+            )
+            model_early = app.RadarFrame(
+                frame_id="iconraw--20260705T090000Z--006",
+                time=after + app.timedelta(minutes=15),
+                is_forecast=True,
+                image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+                rain=np.full((2, 2), 10.0, dtype=np.float32),
+                snow=np.zeros((2, 2), dtype=np.float32),
+                reference_time=after,
+            )
+            model_late = app.RadarFrame(
+                frame_id="iconraw--20260705T090000Z--007",
+                time=after + app.timedelta(minutes=60),
+                is_forecast=True,
+                image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+                rain=np.full((2, 2), 10.0, dtype=np.float32),
+                snow=np.zeros((2, 2), dtype=np.float32),
+                reference_time=after,
+            )
+
+            blended = app._apply_icon_handoff([model_early, model_late], after, nowcast)
+
+            self.assertAlmostEqual(float(blended[0].rain[0, 0]), 4.0, places=4)
+            self.assertAlmostEqual(float(blended[1].rain[0, 0]), 10.0, places=4)
+        finally:
+            app.RADAR_HANDOFF_MINUTES = old_minutes
+
     def _frame(self, frame_id: str, time: datetime, is_forecast: bool) -> app.RadarFrame:
         return app.RadarFrame(
             frame_id=frame_id,
