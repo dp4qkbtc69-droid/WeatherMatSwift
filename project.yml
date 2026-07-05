@@ -48,7 +48,7 @@ targets:
       properties:
         CFBundleDisplayName: WeatherMat
         CFBundleShortVersionString: "1.1"
-        CFBundleVersion: "3"
+        CFBundleVersion: "4"
         # App only uses standard HTTPS (exempt) — skips the export-compliance
         # question on every TestFlight upload.
         ITSAppUsesNonExemptEncryption: false
@@ -83,7 +83,7 @@ targets:
         INFOPLIST_FILE: WeatherMat/Info.plist
         CODE_SIGN_ENTITLEMENTS: WeatherMat/WeatherMat.entitlements
         MARKETING_VERSION: "1.1"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
     dependencies:
