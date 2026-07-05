@@ -18,6 +18,7 @@
 		1D63D26BB8AA66A3A17ABE36 /* WeatherMatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */; };
 		1E24A5AA3BA4B4B802E15309 /* EnsembleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B470F12426BB9567B938E302 /* EnsembleLogicTests.swift */; };
 		229448EC7E9BA5DBF5928FD8 /* WeatherProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71694B7E14EC62B8FA0B945 /* WeatherProviding.swift */; };
+		267B102A8E1F56DCAE013B79 /* RegionPackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D9D54D26E9D3929D3236B3 /* RegionPackService.swift */; };
 		2839B118043C6E8EEC4278E3 /* LocalConfig.example.plist in Resources */ = {isa = PBXBuildFile; fileRef = D0D0EA0A0F19D58B7C7AA61B /* LocalConfig.example.plist */; };
 		2FA676FA6395D665B7A79092 /* WeatherMatApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CED0D0C5AE19AD5566849B5 /* WeatherMatApp.swift */; };
 		3454EA341C34508AFA6FC94D /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D816A840CA115017249F019 /* CoreLocation.framework */; };
@@ -38,6 +39,7 @@
 		6B27740B637B5FF574FB5527 /* WMOCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89FC9B896677E55B940A006B /* WMOCode.swift */; };
 		6E6E5D4C2A93939D1017D4FD /* WeatherModels+Codable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 011F929AC4A3CF524A757151 /* WeatherModels+Codable.swift */; };
 		733136D46DF91C7AB6564406 /* NetatmoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3B9945C98C66430EFCAE8A /* NetatmoService.swift */; };
+		74735D593B683A27D17B8554 /* RadarRegionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A978C220DA4B57870B9B1770 /* RadarRegionOverlay.swift */; };
 		7D570EBCD50CD300D1F9A1B0 /* WeatherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 206C82A8128749AF92C5EF2B /* WeatherViewModel.swift */; };
 		8610B87782552E27B54F9816 /* DailyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFF05A5460B28EFFF2662544 /* DailyView.swift */; };
 		8CB9CD212091CCA081416311 /* Where2GoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ADD7BF3507A91D98D1489A /* Where2GoView.swift */; };
@@ -84,6 +86,7 @@
 		206C82A8128749AF92C5EF2B /* WeatherViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherViewModel.swift; sourceTree = "<group>"; };
 		23D93D7F408AA7028CDC7022 /* WeatherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherView.swift; sourceTree = "<group>"; };
 		284852AA4CFE321960159DEF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		28D9D54D26E9D3929D3236B3 /* RegionPackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegionPackService.swift; sourceTree = "<group>"; };
 		394BC52E70EFD00A308136AC /* LocationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationsView.swift; sourceTree = "<group>"; };
 		3B4094F53610CB7BBF331F96 /* RainRadarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RainRadarService.swift; sourceTree = "<group>"; };
 		3C789EC5CA9E9B7A1AB7923B /* BrightSkyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrightSkyService.swift; sourceTree = "<group>"; };
@@ -109,6 +112,7 @@
 		932F42A0FC4EF8D453CF3F2C /* WeatherKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WeatherKit.framework; path = System/Library/Frameworks/WeatherKit.framework; sourceTree = SDKROOT; };
 		9A3A8DE0FDAB62F15244E1E5 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		A2760C58E68456FFB43786EB /* Where2GoModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Where2GoModels.swift; sourceTree = "<group>"; };
+		A978C220DA4B57870B9B1770 /* RadarRegionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadarRegionOverlay.swift; sourceTree = "<group>"; };
 		B07CD5CAF249E25DDE7169C7 /* EnsembleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnsembleService.swift; sourceTree = "<group>"; };
 		B0E2C975FE166F84F4828E2C /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
 		B470F12426BB9567B938E302 /* EnsembleLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnsembleLogicTests.swift; sourceTree = "<group>"; };
@@ -220,6 +224,7 @@
 			isa = PBXGroup;
 			children = (
 				BD6F33A31B8C901BF5C46821 /* RadarMapView.swift */,
+				A978C220DA4B57870B9B1770 /* RadarRegionOverlay.swift */,
 				4318FA52FFEDC4B4EA3E322D /* RadarTimelineControl.swift */,
 				B937F29D50C7ED90FA828FBF /* RadarV2Store.swift */,
 				FE433F410731F0A6A380C805 /* RadarWidgets.swift */,
@@ -295,6 +300,7 @@
 				84D5E260D90DE1B9C1DE0602 /* OpenMeteoService.swift */,
 				71F25DA11D5D05FFF86A5683 /* PushRegistrationService.swift */,
 				3B4094F53610CB7BBF331F96 /* RainRadarService.swift */,
+				28D9D54D26E9D3929D3236B3 /* RegionPackService.swift */,
 				CDAA2CBAA73B82099D453481 /* WeatherKitService.swift */,
 				F71694B7E14EC62B8FA0B945 /* WeatherProviding.swift */,
 				F7E71575C4A56F156C65DDC7 /* Where2GoService.swift */,
@@ -458,12 +464,14 @@
 				41B63F31DD396CB64F3FD210 /* OpenMeteoService.swift in Sources */,
 				BE8A9887072CDBEC05AE7550 /* PushRegistrationService.swift in Sources */,
 				4D2E291B4D7D9BA7973C60F8 /* RadarMapView.swift in Sources */,
+				74735D593B683A27D17B8554 /* RadarRegionOverlay.swift in Sources */,
 				98D3A25E1E399A0DFD0A9172 /* RadarTimelineControl.swift in Sources */,
 				006E457BB3F0009E27CA09F0 /* RadarV2Store.swift in Sources */,
 				EF98D6844E04B3FFEC95ED8D /* RadarWidgets.swift in Sources */,
 				B8D29B85D70975CD5DD49AC6 /* RainBannerView.swift in Sources */,
 				FC399537CF6E0BA02626978D /* RainRadarService.swift in Sources */,
 				559C5B9ACB690944BB2065B0 /* RainRadarView.swift in Sources */,
+				267B102A8E1F56DCAE013B79 /* RegionPackService.swift in Sources */,
 				0D75C6EB34687DAA77003031 /* StatsView.swift in Sources */,
 				FA836EAAA2282BD8FE1B6212 /* TopBarView.swift in Sources */,
 				6B27740B637B5FF574FB5527 /* WMOCode.swift in Sources */,

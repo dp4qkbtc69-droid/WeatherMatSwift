@@ -87,6 +87,7 @@ struct RadarV2MapView: UIViewRepresentable {
     let region: MKCoordinateRegion
     let regionRevision: Int
     let request: RadarV2RenderRequest?
+    let regionRenderSet: RadarRegionRenderSet?
     let enabledLayers: Set<DwdWMSLayer>
     let timelineFrame: RainRadarFrame?
     let isPlaying: Bool
@@ -127,7 +128,7 @@ struct RadarV2MapView: UIViewRepresentable {
         }
 
         context.coordinator.onUserInteraction = onUserInteraction
-        context.coordinator.update(request, in: mapView)
+        context.coordinator.update(request, regionRenderSet: regionRenderSet, in: mapView)
         context.coordinator.sync(layerIDs: enabledLayers, timelineFrame: timelineFrame, isPlaying: isPlaying, in: mapView)
         context.coordinator.syncUserAnnotation(userCoordinate, in: mapView)
     }
@@ -157,6 +158,9 @@ struct RadarV2MapView: UIViewRepresentable {
         private var activeTileRenderer: MKTileOverlayRenderer?
         private var previousTileOverlay: RadarV2TileOverlay?
         private var previousTileRenderer: MKTileOverlayRenderer?
+        private var regionRenderSet: RadarRegionRenderSet?
+        private var activeRegionOverlay: RadarRegionOverlay?
+        private var activeRegionOverlayKey: String?
         private var prewarmTask: Task<Void, Never>?
         private var dwdOverlays: [String: MKTileOverlay] = [:]
         private var regionChangeTask: Task<Void, Never>?
@@ -164,15 +168,23 @@ struct RadarV2MapView: UIViewRepresentable {
         private var userAnnotation: MKPointAnnotation?
         var lastAppliedRegionRevision = 0
 
-        func update(_ request: RadarV2RenderRequest?, in mapView: MKMapView) {
+        func update(_ request: RadarV2RenderRequest?, regionRenderSet: RadarRegionRenderSet?, in mapView: MKMapView) {
             guard let request else {
                 clearRadar(in: mapView)
                 self.request = nil
+                self.regionRenderSet = nil
                 return
             }
             self.request = request
-            updateTileOverlay(for: request, in: mapView)
-            prewarmNativeTiles(for: request, in: mapView)
+            self.regionRenderSet = regionRenderSet
+            if updateRegionOverlayIfPossible(for: request, in: mapView) {
+                clearTileRadar(in: mapView)
+                Task { await RadarTileReadinessCenter.shared.markReady(request.frame.id) }
+            } else {
+                clearRegionRadar(in: mapView)
+                updateTileOverlay(for: request, in: mapView)
+                prewarmNativeTiles(for: request, in: mapView)
+            }
         }
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
@@ -183,13 +195,21 @@ struct RadarV2MapView: UIViewRepresentable {
                     try? await Task.sleep(nanoseconds: 180_000_000)
                     guard !Task.isCancelled, let self, let mapView else { return }
                     await MainActor.run {
-                        self.prewarmNativeTiles(for: request, in: mapView)
+                        if self.updateRegionOverlayIfPossible(for: request, in: mapView) {
+                            self.clearTileRadar(in: mapView)
+                        } else {
+                            self.clearRegionRadar(in: mapView)
+                            self.prewarmNativeTiles(for: request, in: mapView)
+                        }
                     }
                 }
             }
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if overlay is RadarRegionOverlay {
+                return RadarRegionOverlayRenderer(overlay: overlay)
+            }
             if let tileOverlay = overlay as? RadarV2TileOverlay {
                 let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
                 renderer.alpha = previousTileOverlay == nil && tileOverlay === activeTileOverlay ? 0.84 : 0
@@ -313,6 +333,24 @@ struct RadarV2MapView: UIViewRepresentable {
             mapView.addOverlay(overlay, level: .aboveLabels)
         }
 
+        private func updateRegionOverlayIfPossible(for request: RadarV2RenderRequest, in mapView: MKMapView) -> Bool {
+            guard request.source == .dwd,
+                  let regionRenderSet,
+                  regionRenderSet.pack.mapRect.regionContains(mapView.visibleMapRect),
+                  mapView.visibleMapRect.width >= regionRenderSet.pack.mapRect.width / 8.0,
+                  let image = regionRenderSet.image(for: request.frame) else {
+                return false
+            }
+            let key = "\(request.frame.id)|\(regionRenderSet.pack.mercator.minX)|\(regionRenderSet.pack.mercator.minY)"
+            guard activeRegionOverlayKey != key else { return true }
+            clearRegionRadar(in: mapView)
+            let overlay = RadarRegionOverlay(mapRect: regionRenderSet.pack.mapRect, image: image)
+            activeRegionOverlay = overlay
+            activeRegionOverlayKey = key
+            mapView.addOverlay(overlay, level: .aboveLabels)
+            return true
+        }
+
         private func prewarmNativeTiles(for request: RadarV2RenderRequest, in mapView: MKMapView) {
             prewarmTask?.cancel()
             guard let plan = RadarV2TilePrefetchPlan(mapView: mapView, request: request) else { return }
@@ -347,6 +385,12 @@ struct RadarV2MapView: UIViewRepresentable {
         private func clearRadar(in mapView: MKMapView) {
             prewarmTask?.cancel()
             regionChangeTask?.cancel()
+            clearRegionRadar(in: mapView)
+            clearTileRadar(in: mapView)
+        }
+
+        private func clearTileRadar(in mapView: MKMapView) {
+            prewarmTask?.cancel()
             if let activeTileOverlay {
                 mapView.removeOverlay(activeTileOverlay)
             }
@@ -360,12 +404,29 @@ struct RadarV2MapView: UIViewRepresentable {
             activeTileOverlayKey = nil
         }
 
+        private func clearRegionRadar(in mapView: MKMapView) {
+            if let activeRegionOverlay {
+                mapView.removeOverlay(activeRegionOverlay)
+            }
+            activeRegionOverlay = nil
+            activeRegionOverlayKey = nil
+        }
+
         func regionApproximatelyMatches(_ lhs: MKCoordinateRegion, _ rhs: MKCoordinateRegion) -> Bool {
             abs(lhs.center.latitude - rhs.center.latitude) < 0.2 &&
             abs(lhs.center.longitude - rhs.center.longitude) < 0.2 &&
             abs(lhs.span.latitudeDelta - rhs.span.latitudeDelta) < 0.4 &&
             abs(lhs.span.longitudeDelta - rhs.span.longitudeDelta) < 0.4
         }
+    }
+}
+
+private extension MKMapRect {
+    func regionContains(_ other: MKMapRect) -> Bool {
+        minX <= other.minX &&
+        minY <= other.minY &&
+        maxX >= other.maxX &&
+        maxY >= other.maxY
     }
 }
 

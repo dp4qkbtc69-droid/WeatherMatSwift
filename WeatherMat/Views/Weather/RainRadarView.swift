@@ -81,6 +81,8 @@ struct RainRadarScreen: View {
     @State private var mapRegion = rainRadarHomeRegion
     @State private var regionRevision = 0
     @State private var enabledLayers: Set<DwdWMSLayer> = [.lightningDensity]
+    @State private var regionRenderSet: RadarRegionRenderSet?
+    @State private var regionPackTask: Task<Void, Never>?
     @State private var showsLegend = false
     @State private var noticeText: String?
     // Chrome visibility state: header + rail hide after inactivity during
@@ -117,6 +119,7 @@ struct RainRadarScreen: View {
                 region: mapRegion,
                 regionRevision: regionRevision,
                 request: store.renderRequest,
+                regionRenderSet: regionRenderSet,
                 enabledLayers: enabledLayers,
                 timelineFrame: store.selectedFrame,
                 isPlaying: store.isPlaying,
@@ -136,7 +139,8 @@ struct RainRadarScreen: View {
                     if showsLegend {
                         RadarLegendView(
                             attribution: store.timeline?.attribution,
-                            isFallbackSource: store.timeline?.source == .rainViewer
+                            isFallbackSource: store.timeline?.source == .rainViewer,
+                            rainPalette: regionRenderSet?.pack.palette.rain
                         ) {
                             withRadarAnimation(.quick) {
                                 showsLegend = false
@@ -195,6 +199,9 @@ struct RainRadarScreen: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .task { await store.load() }
         .task(id: location?.id) {
+            await loadRegionPackIfPossible()
+        }
+        .task(id: location?.id) {
             guard let location else { return }
             await RainRadarService.warmLocation(latitude: location.latitude, longitude: location.longitude)
         }
@@ -203,7 +210,8 @@ struct RainRadarScreen: View {
             while store.isPlaying {
                 try? await Task.sleep(nanoseconds: store.nextPlaybackDelayNanoseconds)
                 guard !Task.isCancelled else { return }
-                if let nextFrame = store.nextPlaybackFrame {
+                if let nextFrame = store.nextPlaybackFrame,
+                   regionRenderSet?.image(for: nextFrame) == nil {
                     // Motion spec: hold/stall on unready frames rather than
                     // jumping to empty tiles. First a quiet wait, then a
                     // visible buffering hold, then advance regardless so a
@@ -237,8 +245,38 @@ struct RainRadarScreen: View {
         }
         .onDisappear {
             chromeHideTask?.cancel()
+            regionPackTask?.cancel()
         }
         .statusBarHidden(false)
+    }
+
+    @MainActor
+    private func loadRegionPackIfPossible() async {
+        regionPackTask?.cancel()
+        regionRenderSet = nil
+        guard let location else { return }
+        let latitude = location.latitude
+        let longitude = location.longitude
+        regionPackTask = Task {
+            do {
+                let pack = try await RegionPackService.fetchRegionPack(
+                    latitude: latitude,
+                    longitude: longitude,
+                    km: Self.localSpanMeters / 1_000.0
+                )
+                let renderSet = await RadarRegionImageRenderer.renderAll(pack: pack)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    regionRenderSet = renderSet
+                    store.isBuffering = false
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    regionRenderSet = nil
+                }
+            }
+        }
     }
 
     // MARK: - Chrome visibility states

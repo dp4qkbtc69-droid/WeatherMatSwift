@@ -39,6 +39,7 @@ struct RadarRoundButton: View {
 struct RadarLegendView: View {
     var attribution: String?
     var isFallbackSource = false
+    var rainPalette: [RadarPaletteStep]?
     let close: () -> Void
 
     var body: some View {
@@ -66,14 +67,14 @@ struct RadarLegendView: View {
                     .foregroundStyle(AppColors.selection)
             } else {
                 HStack(spacing: 1) {
-                    ForEach(RadarLegendStep.steps) { step in
+                    ForEach(legendSteps) { step in
                         step.color.frame(maxWidth: .infinity, minHeight: 8, maxHeight: 8)
                     }
                 }
                 .clipShape(Capsule())
 
                 HStack(spacing: 1) {
-                    ForEach(RadarLegendStep.steps) { step in
+                    ForEach(legendSteps) { step in
                         Text(step.label)
                             .font(.system(.caption2, weight: .medium))
                             .lineLimit(1)
@@ -109,6 +110,25 @@ struct RadarLegendView: View {
         }
         return "DWD-Radarkomposit · Vorhersage: ICON-EU"
     }
+
+    private var legendSteps: [RadarLegendStep] {
+        guard let rainPalette, rainPalette.count == RadarLegendStep.defaultLabels.count else {
+            return RadarLegendStep.steps
+        }
+        return zip(rainPalette, RadarLegendStep.defaultLabels).enumerated().map { index, item in
+            let (step, label) = item
+            return RadarLegendStep(
+                id: "server-\(index)-\(step.lower)",
+                color: Color(
+                    red: Double(step.rgba[safe: 0] ?? 0) / 255.0,
+                    green: Double(step.rgba[safe: 1] ?? 0) / 255.0,
+                    blue: Double(step.rgba[safe: 2] ?? 0) / 255.0,
+                    opacity: 1.0
+                ),
+                label: label
+            )
+        }
+    }
 }
 
 struct RadarLegendStep: Identifiable {
@@ -118,6 +138,7 @@ struct RadarLegendStep: Identifiable {
 
     // Hybrid-Rampe: Blau bis "mäßig", Warnfarben ab "kräftig".
     // Muss synchron zu RAIN_COLOR_STEPS im RadarProxy bleiben.
+    static let defaultLabels = ["sehr leicht", "leicht", "mäßig", "kräftig", "stark", "extrem"]
     static let steps = [
         RadarLegendStep(id: "trace", color: Color(hex: "#cfeefd"), label: "sehr leicht"),
         RadarLegendStep(id: "light", color: Color(hex: "#6fc5f7"), label: "leicht"),
