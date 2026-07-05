@@ -40,6 +40,7 @@ struct RadarRegionPack: Equatable, Sendable {
         let isForecast: Bool
         let source: RainRadarFrame.SourceKind
         let precipitationType: RainRadarFrame.PrecipitationType
+        let referenceTime: Date?
         let intensity: [UInt8]
         let snow: [UInt8]?
     }
@@ -130,6 +131,7 @@ enum RegionPackService {
                 isForecast: raw.isForecast,
                 source: RainRadarFrame.SourceKind(rawValue: raw.source ?? "") ?? .unknown,
                 precipitationType: RainRadarFrame.PrecipitationType(rawValue: raw.precipType ?? "") ?? .unknown,
+                referenceTime: raw.referenceTime,
                 intensity: Array(data[start..<end]),
                 snow: snow
             )
@@ -156,6 +158,7 @@ private struct RegionPackHeader: Codable {
         let isForecast: Bool
         let source: String?
         let precipType: String?
+        let referenceTime: Date?
         let offsetBytes: Int
         let snowOffsetBytes: Int?
     }

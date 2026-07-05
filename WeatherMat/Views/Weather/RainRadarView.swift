@@ -163,7 +163,8 @@ struct RainRadarScreen: View {
                         RadarLegendView(
                             attribution: store.timeline?.attribution,
                             isFallbackSource: store.timeline?.source == .rainViewer,
-                            rainPalette: regionRenderSet?.pack.palette.rain
+                            rainPalette: regionRenderSet?.pack.palette.rain,
+                            currentFrame: store.selectedFrame
                         ) {
                             withRadarAnimation(.quick) {
                                 showsLegend = false

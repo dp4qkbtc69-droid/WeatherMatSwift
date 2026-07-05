@@ -995,6 +995,7 @@ def _build_region_pack(cache: RadarCache, lat: float, lon: float, km: float, gri
                 "time": frame.time.isoformat(),
                 "isForecast": frame.is_forecast,
                 "source": _frame_source(frame),
+                "referenceTime": frame.reference_time.isoformat() if frame.reference_time else None,
                 "precipType": frame.precipitation_type,
                 "offsetBytes": offset,
                 "snowOffsetBytes": snow_offset,

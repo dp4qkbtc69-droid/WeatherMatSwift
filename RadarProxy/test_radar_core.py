@@ -184,6 +184,7 @@ class RadarCoreTests(unittest.TestCase):
             image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
             rain=rain,
             snow=snow,
+            reference_time=time,
             precipitation_type="mixed",
         )
         cache = app.RadarCache(loaded_at=1.0, frames=[frame], tile_cache={})
@@ -196,6 +197,7 @@ class RadarCoreTests(unittest.TestCase):
         self.assertEqual(header["grid"], {"w": 16, "h": 16})
         self.assertEqual(header["frames"][0]["offsetBytes"], 0)
         self.assertEqual(header["frames"][0]["snowOffsetBytes"], 256)
+        self.assertEqual(header["frames"][0]["referenceTime"], "2026-07-05T10:00:00+00:00")
         self.assertEqual(len(payload), 512)
         self.assertEqual(payload[0], 5)
         self.assertEqual(payload[256], 2)

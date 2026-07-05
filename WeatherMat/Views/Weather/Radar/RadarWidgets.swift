@@ -40,6 +40,7 @@ struct RadarLegendView: View {
     var attribution: String?
     var isFallbackSource = false
     var rainPalette: [RadarPaletteStep]?
+    var currentFrame: RainRadarFrame?
     let close: () -> Void
 
     var body: some View {
@@ -98,6 +99,13 @@ struct RadarLegendView: View {
                 .font(.system(.caption2, weight: .regular))
                 .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(2)
+
+            if let modelInfoText {
+                Text(modelInfoText)
+                    .font(.system(.caption2, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(3)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -108,7 +116,23 @@ struct RadarLegendView: View {
         if isFallbackSource {
             return attribution ?? "RainViewer"
         }
-        return "DWD-Radarkomposit · Vorhersage: ICON-EU"
+        return "DWD-Radarkomposit · Nowcast + ICON-EU"
+    }
+
+    private var modelInfoText: String? {
+        guard !isFallbackSource, currentFrame?.sourceKind == .iconEuRaw else { return nil }
+        var text = "Modell-Frames sind ein einzelner Lauf; Gewitter können zeitlich oder örtlich abweichen."
+        if let referenceTime = currentFrame?.referenceTime {
+            let run = referenceTime.formatted(
+                .dateTime
+                    .hour()
+                    .minute()
+                    .timeZone(TimeZone(secondsFromGMT: 0)!)
+                    .locale(.init(identifier: "de_DE"))
+            )
+            text += " Modelllauf: \(run) UTC."
+        }
+        return text
     }
 
     private var legendSteps: [RadarLegendStep] {
