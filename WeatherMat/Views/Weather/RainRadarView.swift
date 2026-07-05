@@ -88,6 +88,24 @@ struct RainRadarScreen: View {
     @State private var chromeHidden = false
     @State private var chromeHideTask: Task<Void, Never>?
 
+    /// Initial radar view: ~65 km around the location, so the most relevant
+    /// tiles load first. The wider map fills in as the user zooms/pans out.
+    private static let localSpanMeters: CLLocationDistance = 130_000
+
+    init(location: SavedLocation?) {
+        self.location = location
+        _mapRegion = State(initialValue: Self.initialRegion(for: location))
+    }
+
+    private static func initialRegion(for location: SavedLocation?) -> MKCoordinateRegion {
+        guard let location else { return rainRadarHomeRegion }
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: location.latitude, longitude: location.longitude),
+            latitudinalMeters: localSpanMeters,
+            longitudinalMeters: localSpanMeters
+        )
+    }
+
     private var userCoordinate: CLLocationCoordinate2D? {
         guard let location else { return nil }
         return CLLocationCoordinate2D(latitude: location.latitude, longitude: location.longitude)
@@ -327,7 +345,8 @@ struct RainRadarScreen: View {
                 withRadarAnimation(.map) {
                     mapRegion = MKCoordinateRegion(
                         center: userCoordinate,
-                        span: MKCoordinateSpan(latitudeDelta: 2.6, longitudeDelta: 2.6)
+                        latitudinalMeters: Self.localSpanMeters,
+                        longitudinalMeters: Self.localSpanMeters
                     )
                     regionRevision += 1
                 }

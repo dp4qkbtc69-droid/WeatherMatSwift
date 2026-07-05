@@ -320,25 +320,42 @@ final class WeatherViewModel {
     private let gpsCooldown: TimeInterval = 120
     private var lastGPSFix: Date?
 
+    /// Called on app launch: keep the GPS location's data fresh but restore the
+    /// location the user last had open, instead of always snapping to GPS.
     @MainActor
-    func useGPSLocation() async {
-        guard !isRequestingGPS else { return }
+    func refreshOnLaunch() async {
+        // Preserve the last-shown location only when it's a real saved city;
+        // if GPS was showing (or nothing is saved yet), default to GPS.
+        let keepCurrent = activeLocation.map { !$0.isGPS } ?? false
+        await useGPSLocation(makeActive: !keepCurrent)
+    }
 
-        // Recent fix available — just refresh weather for it, no GPS hardware
+    /// Refreshes the GPS location. When `makeActive` is false the current
+    /// selection is preserved (the GPS entry is still updated in the
+    /// background), so launching the app keeps the last-shown location.
+    @MainActor
+    func useGPSLocation(makeActive: Bool = true) async {
+        guard !isRequestingGPS else { return }
+        let previousActiveID = activeLocation?.id
+
+        // Recent fix available — just refresh weather, no GPS hardware
         if let last = lastGPSFix,
            Date().timeIntervalSince(last) < gpsCooldown,
            let gpsIndex = savedLocations.firstIndex(where: { $0.isGPS }) {
-            let gpsLoc = savedLocations[gpsIndex]
-            activeLocationIndex = gpsIndex
-            saveActiveLocationIndex()
-            await loadWeather(for: gpsLoc)
+            if makeActive {
+                activeLocationIndex = gpsIndex
+                saveActiveLocationIndex()
+            }
+            if let loc = activeLocation { await loadWeather(for: loc) }
             return
         }
 
         isRequestingGPS = true
         defer { isRequestingGPS = false }
 
-        isLoading = true
+        // Only show the global spinner when GPS is actually taking over the
+        // view; keeping the current location must not blank it out.
+        if makeActive { isLoading = true }
         do {
             let clLoc = try await withTimeout(seconds: 10) {
                 try await LocationService.shared.requestCurrentLocation()
@@ -366,15 +383,29 @@ final class WeatherViewModel {
             } else {
                 savedLocations.insert(saved, at: 0)
             }
-            activeLocationIndex = 0
-            selectedDayIndex    = nil
             lastGPSFix = Date()
             saveLocations()
+
+            // Restore focus: GPS when taking over, otherwise the previously
+            // shown location (its index may have shifted from the insert).
+            if makeActive {
+                activeLocationIndex = 0
+                selectedDayIndex    = nil
+            } else if let previousActiveID,
+                      let idx = savedLocations.firstIndex(where: { $0.id == previousActiveID }) {
+                activeLocationIndex = idx
+            } else {
+                activeLocationIndex = 0
+                selectedDayIndex    = nil
+            }
             saveActiveLocationIndex()
-            prewarmRadarIfNeeded(for: saved)
-            await loadWeather(for: saved, force: true)
+
+            if let active = activeLocation {
+                prewarmRadarIfNeeded(for: active)
+                await loadWeather(for: active, force: true)
+            }
         } catch {
-            isLoading = false
+            if makeActive { isLoading = false }
             if let loc = activeLocation {
                 await loadWeather(for: loc)
             } else {

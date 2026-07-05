@@ -19,7 +19,7 @@ struct ContentView: View {
                 .presentationBackground(.clear)
         }
         .task {
-            await vm.useGPSLocation()
+            await vm.refreshOnLaunch()
         }
     }
 
