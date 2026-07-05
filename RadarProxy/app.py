@@ -15,6 +15,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -74,6 +75,9 @@ REFRESH_INTERVAL_SECONDS = int(os.environ.get("DWD_RADAR_REFRESH_INTERVAL_SECOND
 STARTUP_WARM = os.environ.get("DWD_RADAR_STARTUP_WARM", "true").lower() in {"1", "true", "yes"}
 WARM_TILES = os.environ.get("DWD_RADAR_WARM_TILES", "true").lower() in {"1", "true", "yes"}
 WARM_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_WARM_FRAME_LIMIT", "25"))
+# Render warm tiles across this many threads. Defaults to the core count so
+# both vCPUs are used; numpy/PIL release the GIL during render/PNG encode.
+WARM_WORKERS = max(1, int(os.environ.get("DWD_RADAR_WARM_WORKERS", str(os.cpu_count() or 2))))
 WARM_DETAIL_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_WARM_DETAIL_FRAME_LIMIT", "6"))
 WARM_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_WARM_ZOOMS", "5,6").split(",") if item.strip())
 WARM_DETAIL_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_WARM_DETAIL_ZOOMS", "7").split(",") if item.strip())
@@ -964,33 +968,48 @@ def _warm_tiles_background(cache: RadarCache, cache_id: float) -> None:
 
     hotspot_points = _all_hotspot_points()
     try:
+        # Build the full tile worklist first, then render across WARM_WORKERS
+        # threads so both vCPUs are used instead of one.
+        tasks: List[Tuple[RadarFrame, int, int, int]] = []
         for frame_index, frame in enumerate(cache.frames[:max(1, WARM_FRAME_LIMIT)]):
+            seen: set = set()
             zooms = list(WARM_ZOOMS)
             if frame_index < WARM_DETAIL_FRAME_LIMIT:
                 zooms.extend(WARM_DETAIL_ZOOMS)
             for z in dict.fromkeys(zooms):
                 for x, y in _combined_warm_tile_paths(z):
-                    _, did_render = _tile_bytes(cache, frame, z, x, y)
-                    if did_render:
-                        rendered += 1
-                    else:
-                        reused += 1
+                    if (z, x, y) in seen:
+                        continue
+                    seen.add((z, x, y))
+                    tasks.append((frame, z, x, y))
             # Local detail: warm the higher zooms only around the hotspots so
             # the app's ~z8 open view plays back from cache.
             if HOTSPOT_WARM and frame_index < HOTSPOT_DETAIL_FRAME_LIMIT:
-                seen: set = set()
                 for z in HOTSPOT_DETAIL_ZOOMS:
                     for lat, lon in hotspot_points:
                         for x, y in _hotspot_view_tile_paths(z, lat, lon, HOTSPOT_DETAIL_HALF_KM):
                             if (z, x, y) in seen:
                                 continue
                             seen.add((z, x, y))
-                            _, did_render = _tile_bytes(cache, frame, z, x, y)
-                            if did_render:
-                                rendered += 1
-                            else:
-                                reused += 1
+                            tasks.append((frame, z, x, y))
             warmed_frames += 1
+
+        def _warm_one(task: Tuple[RadarFrame, int, int, int]) -> bool:
+            frame, z, x, y = task
+            try:
+                _, did_render = _tile_bytes(cache, frame, z, x, y)
+                return did_render
+            except Exception as tile_error:
+                logger.error("warm tile failed: %s", tile_error)
+                return False
+
+        if WARM_WORKERS > 1 and len(tasks) > 1:
+            with ThreadPoolExecutor(max_workers=WARM_WORKERS) as pool:
+                results = list(pool.map(_warm_one, tasks))
+        else:
+            results = [_warm_one(task) for task in tasks]
+        rendered = sum(1 for did in results if did)
+        reused = len(results) - rendered
     except Exception as error:
         logger.error("tile warm failed: %s", error)
     finally:

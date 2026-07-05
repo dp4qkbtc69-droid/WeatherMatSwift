@@ -22,6 +22,10 @@ services:
       DWD_RADAR_REFRESH_INTERVAL_SECONDS: "${DWD_RADAR_REFRESH_INTERVAL_SECONDS:-300}"
       DWD_RADAR_STARTUP_WARM: "${DWD_RADAR_STARTUP_WARM:-true}"
       DWD_RADAR_WARM_TILES: "${DWD_RADAR_WARM_TILES:-true}"
+      # Render warm tiles across both vCPUs (default = core count). Only speeds
+      # up render-heavy warms (cold start / multi-location); live requests
+      # already parallelize via uvicorn's threadpool.
+      DWD_RADAR_WARM_WORKERS: "${DWD_RADAR_WARM_WORKERS:-2}"
       # Warm the overview zooms (5,6) for every frame so jumping to follow-up
       # days shows tiles immediately; detail zoom (7) stays near-term only.
       DWD_RADAR_WARM_FRAME_LIMIT: "${DWD_RADAR_WARM_FRAME_LIMIT:-96}"
