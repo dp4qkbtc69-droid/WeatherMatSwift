@@ -105,7 +105,7 @@ except ValueError:
     TILE_RENDER_SCALE = 2
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
-APP_VERSION = "smooth-bilinear-warm-2026-07-03"
+APP_VERSION = "smooth-palette-feather-2026-07-05"
 
 # Hybrid rain palette: blue for light/moderate rain, warning colors
 # (yellow/orange/red) from "kraeftig" upwards. Must stay in sync with
