@@ -88,6 +88,7 @@ struct RadarV2MapView: UIViewRepresentable {
     let regionRevision: Int
     let request: RadarV2RenderRequest?
     let regionRenderSet: RadarRegionRenderSet?
+    let suppressesTilePrefetch: Bool
     let enabledLayers: Set<DwdWMSLayer>
     let timelineFrame: RainRadarFrame?
     let isPlaying: Bool
@@ -128,7 +129,12 @@ struct RadarV2MapView: UIViewRepresentable {
         }
 
         context.coordinator.onUserInteraction = onUserInteraction
-        context.coordinator.update(request, regionRenderSet: regionRenderSet, in: mapView)
+        context.coordinator.update(
+            request,
+            regionRenderSet: regionRenderSet,
+            suppressesTilePrefetch: suppressesTilePrefetch,
+            in: mapView
+        )
         context.coordinator.sync(layerIDs: enabledLayers, timelineFrame: timelineFrame, isPlaying: isPlaying, in: mapView)
         context.coordinator.syncUserAnnotation(userCoordinate, in: mapView)
     }
@@ -166,20 +172,30 @@ struct RadarV2MapView: UIViewRepresentable {
         private var regionChangeTask: Task<Void, Never>?
         private var frozenWMSLayerTime: Date?
         private var userAnnotation: MKPointAnnotation?
+        private var suppressesTilePrefetch = false
         var lastAppliedRegionRevision = 0
 
-        func update(_ request: RadarV2RenderRequest?, regionRenderSet: RadarRegionRenderSet?, in mapView: MKMapView) {
+        func update(
+            _ request: RadarV2RenderRequest?,
+            regionRenderSet: RadarRegionRenderSet?,
+            suppressesTilePrefetch: Bool,
+            in mapView: MKMapView
+        ) {
             guard let request else {
                 clearRadar(in: mapView)
                 self.request = nil
                 self.regionRenderSet = nil
+                self.suppressesTilePrefetch = false
                 return
             }
             self.request = request
             self.regionRenderSet = regionRenderSet
+            self.suppressesTilePrefetch = suppressesTilePrefetch
             if updateRegionOverlayIfPossible(for: request, in: mapView) {
                 clearTileRadar(in: mapView)
                 Task { await RadarTileReadinessCenter.shared.markReady(request.frame.id) }
+            } else if shouldSuppressTileFallback(for: request, in: mapView) {
+                clearTileRadar(in: mapView)
             } else {
                 clearRegionRadar(in: mapView)
                 updateTileOverlay(for: request, in: mapView)
@@ -196,6 +212,8 @@ struct RadarV2MapView: UIViewRepresentable {
                     guard !Task.isCancelled, let self, let mapView else { return }
                     await MainActor.run {
                         if self.updateRegionOverlayIfPossible(for: request, in: mapView) {
+                            self.clearTileRadar(in: mapView)
+                        } else if self.shouldSuppressTileFallback(for: request, in: mapView) {
                             self.clearTileRadar(in: mapView)
                         } else {
                             self.clearRegionRadar(in: mapView)
@@ -349,6 +367,13 @@ struct RadarV2MapView: UIViewRepresentable {
             activeRegionOverlayKey = key
             mapView.addOverlay(overlay, level: .aboveLabels)
             return true
+        }
+
+        private func shouldSuppressTileFallback(for request: RadarV2RenderRequest, in mapView: MKMapView) -> Bool {
+            guard suppressesTilePrefetch, request.source == .dwd else { return false }
+            guard let regionRenderSet else { return true }
+            return regionRenderSet.pack.mapRect.regionContains(mapView.visibleMapRect) &&
+                mapView.visibleMapRect.width >= regionRenderSet.pack.mapRect.width / 8.0
         }
 
         private func prewarmNativeTiles(for request: RadarV2RenderRequest, in mapView: MKMapView) {

@@ -7,6 +7,11 @@ private let rainRadarHomeRegion = MKCoordinateRegion(
     span: MKCoordinateSpan(latitudeDelta: 8.5, longitudeDelta: 11.0)
 )
 
+private struct RegionFrameRenderPlan: Sendable {
+    let frames: [RadarRegionPack.Frame]
+    let readinessFrameIDs: [String: String]
+}
+
 struct RainRadarCardView: View {
     let location: SavedLocation?
     let rain: RainAnalysis
@@ -82,6 +87,7 @@ struct RainRadarScreen: View {
     @State private var regionRevision = 0
     @State private var enabledLayers: Set<DwdWMSLayer> = [.lightningDensity]
     @State private var regionRenderSet: RadarRegionRenderSet?
+    @State private var isRegionPackLoading = false
     @State private var regionPackTask: Task<Void, Never>?
     @State private var showsLegend = false
     @State private var noticeText: String?
@@ -121,6 +127,7 @@ struct RainRadarScreen: View {
                 regionRevision: regionRevision,
                 request: store.renderRequest,
                 regionRenderSet: regionRenderSet,
+                suppressesTilePrefetch: isRegionPackLoading,
                 enabledLayers: enabledLayers,
                 timelineFrame: store.selectedFrame,
                 isPlaying: store.isPlaying,
@@ -255,9 +262,11 @@ struct RainRadarScreen: View {
     private func loadRegionPackIfPossible() async {
         regionPackTask?.cancel()
         regionRenderSet = nil
+        isRegionPackLoading = false
         guard let location else { return }
         let latitude = location.latitude
         let longitude = location.longitude
+        isRegionPackLoading = true
         regionPackTask = Task {
             do {
                 let pack = try await RegionPackService.fetchRegionPack(
@@ -265,19 +274,86 @@ struct RainRadarScreen: View {
                     longitude: longitude,
                     km: Self.localRegionPackKilometers
                 )
-                let renderSet = await RadarRegionImageRenderer.renderAll(pack: pack)
+                for _ in 0..<20 {
+                    let hasSelectedFrame = await MainActor.run { store.selectedFrame != nil }
+                    if hasSelectedFrame { break }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+                let plan = await MainActor.run {
+                    regionRenderPlan(for: pack)
+                }
+                var images: [String: CGImage] = [:]
+                images.reserveCapacity(plan.frames.count)
+                for frame in plan.frames {
+                    guard !Task.isCancelled else { return }
+                    guard let rendered = await RadarRegionImageRenderer.renderFrame(frame, pack: pack) else { continue }
+                    images[rendered.frameID] = rendered.image
+                    let nextSet = RadarRegionRenderSet(pack: pack, images: images)
+                    let readinessFrameID = plan.readinessFrameIDs[rendered.frameID]
+                    await MainActor.run {
+                        regionRenderSet = nextSet
+                        store.isBuffering = false
+                    }
+                    if let readinessFrameID {
+                        await RadarTileReadinessCenter.shared.markReady(readinessFrameID)
+                    }
+                }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    regionRenderSet = renderSet
+                    isRegionPackLoading = false
                     store.isBuffering = false
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     regionRenderSet = nil
+                    isRegionPackLoading = false
                 }
             }
         }
+    }
+
+    @MainActor
+    private func regionRenderPlan(for pack: RadarRegionPack) -> RegionFrameRenderPlan {
+        let packFramesByID = Dictionary(uniqueKeysWithValues: pack.frames.map { ($0.id, $0) })
+        var readinessFrameIDs: [String: String] = [:]
+        for frame in store.visibleFrames {
+            readinessFrameIDs[RegionPackService.regionFrameID(from: frame)] = frame.id
+        }
+        var orderedIDs: [String] = []
+        var seen = Set<String>()
+
+        func append(_ frame: RainRadarFrame) {
+            let id = RegionPackService.regionFrameID(from: frame)
+            guard packFramesByID[id] != nil, seen.insert(id).inserted else { return }
+            orderedIDs.append(id)
+        }
+
+        let visible = store.visibleFrames
+        if let selectedFrame = store.selectedFrame {
+            append(selectedFrame)
+        }
+        if !visible.isEmpty {
+            let start = min(store.selectedIndex, visible.count - 1)
+            if start < visible.count - 1 {
+                for index in (start + 1)..<visible.count {
+                    append(visible[index])
+                }
+            }
+            if start > 0 {
+                for index in stride(from: start - 1, through: 0, by: -1) {
+                    append(visible[index])
+                }
+            }
+        }
+        for frame in pack.frames where seen.insert(frame.id).inserted {
+            orderedIDs.append(frame.id)
+        }
+
+        return RegionFrameRenderPlan(
+            frames: orderedIDs.compactMap { packFramesByID[$0] },
+            readinessFrameIDs: readinessFrameIDs
+        )
     }
 
     // MARK: - Chrome visibility states

@@ -364,7 +364,7 @@ def region_pack(request: Request, lat: float, lon: float, km: float = 130.0, fra
     rounded_lat = round(lat, 3)
     rounded_lon = round(lon, 3)
     rounded_km = round(km, 1)
-    grid_size = int(os.environ.get("DWD_RADAR_REGION_GRID_SIZE", "256"))
+    grid_size = int(os.environ.get("DWD_RADAR_REGION_GRID_SIZE", "384"))
     grid_size = max(96, min(512, grid_size))
     key = (rounded_lat, rounded_lon, rounded_km, grid_size, cache.loaded_at)
     with cache.region_pack_cache_lock:

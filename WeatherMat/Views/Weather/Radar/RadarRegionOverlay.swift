@@ -13,6 +13,11 @@ struct RadarRegionRenderSet: @unchecked Sendable {
     }
 }
 
+struct RenderedRegionFrame: @unchecked Sendable {
+    let frameID: String
+    let image: CGImage
+}
+
 enum RadarRegionImageRenderer {
     static func renderAll(pack: RadarRegionPack) async -> RadarRegionRenderSet {
         await Task.detached(priority: .utility) {
@@ -24,6 +29,13 @@ enum RadarRegionImageRenderer {
                 }
             }
             return RadarRegionRenderSet(pack: pack, images: images)
+        }.value
+    }
+
+    static func renderFrame(_ frame: RadarRegionPack.Frame, pack: RadarRegionPack) async -> RenderedRegionFrame? {
+        await Task.detached(priority: .utility) {
+            guard let image = render(frame: frame, pack: pack) else { return nil }
+            return RenderedRegionFrame(frameID: frame.id, image: image)
         }.value
     }
 
@@ -114,22 +126,33 @@ enum RadarRegionImageRenderer {
         for index in 0..<alpha.count {
             alpha[index] = rgba[index * 4 + 3]
         }
-        var scratch = alpha
+        var horizontal = alpha
+        var vertical = alpha
         for _ in 0..<passes {
             for y in 0..<height {
+                let row = y * width
                 for x in 0..<width {
+                    let left = max(0, x - 1)
+                    let right = min(width - 1, x + 1)
                     var total = 0
-                    var count = 0
-                    for yy in max(0, y - 1)...min(height - 1, y + 1) {
-                        for xx in max(0, x - 1)...min(width - 1, x + 1) {
-                            total += Int(alpha[yy * width + xx])
-                            count += 1
-                        }
+                    for xx in left...right {
+                        total += Int(alpha[row + xx])
                     }
-                    scratch[y * width + x] = UInt8(total / max(1, count))
+                    horizontal[row + x] = UInt8(total / (right - left + 1))
                 }
             }
-            swap(&alpha, &scratch)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let top = max(0, y - 1)
+                    let bottom = min(height - 1, y + 1)
+                    var total = 0
+                    for yy in top...bottom {
+                        total += Int(horizontal[yy * width + x])
+                    }
+                    vertical[y * width + x] = UInt8(total / (bottom - top + 1))
+                }
+            }
+            swap(&alpha, &vertical)
         }
         for index in 0..<alpha.count {
             rgba[index * 4 + 3] = alpha[index]
