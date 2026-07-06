@@ -1,5 +1,6 @@
 // NotificationService.swift
 import Foundation
+import os
 @preconcurrency import UserNotifications
 import UIKit
 
@@ -7,6 +8,7 @@ import UIKit
 final class NotificationService: NSObject {
 
     static let shared = NotificationService()
+    private static let logger = Logger(subsystem: "de.praxishartlep.weathermat", category: "Notifications")
     private let seenKey = "seenWarningIDs_v1"
 
     private override init() {
@@ -17,7 +19,7 @@ final class NotificationService: NSObject {
     // MARK: - Permission
     func requestAuthorization() async {
         let granted = (try? await UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            .requestAuthorization(options: [.alert, .sound, .badge, .criticalAlert])) ?? false
         if granted {
             // Device token arrives via AppDelegate and is forwarded to the proxy.
             UIApplication.shared.registerForRemoteNotifications()
@@ -31,6 +33,7 @@ final class NotificationService: NSObject {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized else { return }
+        let criticalAlertsEnabled = settings.criticalAlertSetting == .enabled
 
         let seenIDs = Set((UserDefaults.standard.array(forKey: seenKey) as? [String]) ?? [])
         var newSeen = seenIDs
@@ -44,8 +47,13 @@ final class NotificationService: NSObject {
             content.title          = dwdTitle(warning.severity)
             content.body           = warning.headlineDe
             content.subtitle       = warning.eventDe
-            content.sound          = warning.severity >= .severe ? .defaultCritical : .default
-            content.interruptionLevel = warning.severity >= .severe ? .critical : .active
+            if warning.severity >= .severe, criticalAlertsEnabled {
+                content.sound = .defaultCritical
+                content.interruptionLevel = .critical
+            } else {
+                content.sound = .default
+                content.interruptionLevel = .active
+            }
 
             // Badge: number of active severe/extreme warnings
             if newSevereCount > 0 { content.badge = NSNumber(value: newSevereCount) }
@@ -56,7 +64,11 @@ final class NotificationService: NSObject {
                 content:    content,
                 trigger:    trigger
             )
-            try? await center.add(request)
+            do {
+                try await center.add(request)
+            } catch {
+                Self.logger.warning("warning notification failed: \(String(describing: error), privacy: .public)")
+            }
         }
 
         // Clear badge if no active warnings

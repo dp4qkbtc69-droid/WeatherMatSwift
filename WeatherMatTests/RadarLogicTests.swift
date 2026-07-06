@@ -1,5 +1,6 @@
 // RadarLogicTests.swift
 import Foundation
+import CoreGraphics
 import Testing
 @testable import WeatherMat
 
@@ -148,5 +149,45 @@ struct RadarLogicTests {
         #expect(fractional != nil)
         #expect(plain == fractional)
         #expect(RainRadarService.parseDwdDate("kein-datum") == nil)
+    }
+
+    // MARK: - Region renderer color contract
+
+    @Test func regionRendererAppliesRainCutoffButPaintsSnowTrace() throws {
+        let frame = RadarRegionPack.Frame(
+            id: "golden",
+            time: Self.base,
+            isForecast: false,
+            source: .dwdRadar,
+            precipitationType: .mixed,
+            referenceTime: nil,
+            // scale=10: 2 -> 0.2 (below rain cutoff), 4 -> 0.4 (paint rain)
+            intensity: [2, 4, 0, 0],
+            // scale=10: 1 -> 0.1. Snow must paint despite minIntensity=0.3.
+            snow: [0, 0, 1, 0]
+        )
+        let pack = RadarRegionPack(
+            bbox: .init(west: 0, south: 0, east: 1, north: 1),
+            mercator: .init(minX: 0, minY: 0, maxX: 1, maxY: 1),
+            grid: .init(w: 2, h: 2),
+            scale: 10,
+            hasSnow: true,
+            palette: .init(
+                rain: [.init(lower: 0.3, upper: 1.0, rgba: [10, 20, 30, 255])],
+                snow: [.init(lower: 0.01, upper: 1.0, rgba: [200, 210, 220, 255])]
+            ),
+            minIntensity: 0.3,
+            featherRadius: 0,
+            frames: [frame]
+        )
+
+        let image = try #require(RadarRegionImageRenderer.render(frame: frame, pack: pack))
+        let data = try #require(image.dataProvider?.data)
+        let bytes = [UInt8](data as Data)
+
+        #expect(Array(bytes[0..<4]) == [0, 0, 0, 0])
+        #expect(Array(bytes[4..<8]) == [10, 20, 30, 255])
+        #expect(Array(bytes[8..<12]) == [200, 210, 220, 255])
+        #expect(Array(bytes[12..<16]) == [0, 0, 0, 0])
     }
 }

@@ -20,17 +20,17 @@ actor RadarTileReadinessCenter {
     static let shared = RadarTileReadinessCenter()
 
     private var readyFrameIDs = Set<String>()
-    private var continuations: [String: [CheckedContinuation<Void, Never>]] = [:]
+    private var continuations: [String: [UUID: CheckedContinuation<Void, Never>]] = [:]
 
     func markReady(_ frameID: String) {
         readyFrameIDs.insert(frameID)
-        let waiting = continuations.removeValue(forKey: frameID) ?? []
+        let waiting = continuations.removeValue(forKey: frameID).map { Array($0.values) } ?? []
         waiting.forEach { $0.resume() }
     }
 
     func invalidateAll() {
         readyFrameIDs.removeAll()
-        let waiting = continuations.values.flatMap { $0 }
+        let waiting = continuations.values.flatMap { Array($0.values) }
         continuations.removeAll()
         waiting.forEach { $0.resume() }
     }
@@ -45,29 +45,33 @@ actor RadarTileReadinessCenter {
     @discardableResult
     func waitUntilReady(_ frameID: String, timeoutNanoseconds: UInt64) async -> Bool {
         if readyFrameIDs.contains(frameID) { return true }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                await withCheckedContinuation { continuation in
+        let waitID = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if readyFrameIDs.contains(frameID) {
+                    continuation.resume()
+                } else {
+                    continuations[frameID, default: [:]][waitID] = continuation
                     Task {
-                        await self.storeContinuation(continuation, for: frameID)
+                        try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                        await self.resumeContinuation(for: frameID, waitID: waitID)
                     }
                 }
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+        } onCancel: {
+            Task {
+                await self.resumeContinuation(for: frameID, waitID: waitID)
             }
-            await group.next()
-            group.cancelAll()
         }
         return readyFrameIDs.contains(frameID)
     }
 
-    private func storeContinuation(_ continuation: CheckedContinuation<Void, Never>, for frameID: String) {
-        if readyFrameIDs.contains(frameID) {
-            continuation.resume()
-        } else {
-            continuations[frameID, default: []].append(continuation)
+    private func resumeContinuation(for frameID: String, waitID: UUID) {
+        guard let continuation = continuations[frameID]?.removeValue(forKey: waitID) else { return }
+        if continuations[frameID]?.isEmpty == true {
+            continuations[frameID] = nil
         }
+        continuation.resume()
     }
 }
 

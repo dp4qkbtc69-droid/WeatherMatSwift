@@ -197,24 +197,29 @@ enum RainRadarService {
         return request
     }
 
-    static func warmLocation(latitude: Double, longitude: Double) async {
-        guard let baseURL = localDwdRadarBaseURL else { return }
-        guard var components = URLComponents(url: baseURL.appending(path: "warm-location"), resolvingAgainstBaseURL: false) else { return }
+    static func warmLocation(latitude: Double, longitude: Double) async -> Bool {
+        guard let baseURL = localDwdRadarBaseURL else { return false }
+        guard var components = URLComponents(url: baseURL.appending(path: "warm-location"), resolvingAgainstBaseURL: false) else { return false }
         components.queryItems = [
             URLQueryItem(name: "lat", value: String(format: "%.5f", latitude)),
             URLQueryItem(name: "lon", value: String(format: "%.5f", longitude))
         ]
-        guard let url = components.url else { return }
+        guard let url = components.url else { return false }
         var request = authenticatedDwdRadarRequest(url)
         request.httpMethod = "POST"
         request.timeoutInterval = 8
-        _ = try? await URLSession.shared.data(for: request)
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
+        }
     }
 
     /// Registers all saved locations as warm hotspots in one call, so every one
     /// of them opens the radar from cache — not just the active location.
-    static func registerWarmLocations(_ coordinates: [(latitude: Double, longitude: Double)]) async {
-        guard let baseURL = localDwdRadarBaseURL, !coordinates.isEmpty else { return }
+    static func registerWarmLocations(_ coordinates: [(latitude: Double, longitude: Double)]) async -> Bool {
+        guard let baseURL = localDwdRadarBaseURL, !coordinates.isEmpty else { return false }
         var request = authenticatedDwdRadarRequest(baseURL.appending(path: "warm-locations"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -222,9 +227,14 @@ enum RainRadarService {
         let body: [String: Any] = [
             "locations": coordinates.map { ["lat": $0.latitude, "lon": $0.longitude] }
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return false }
         request.httpBody = data
-        _ = try? await URLSession.shared.data(for: request)
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
+        }
     }
 
     private static var localDwdRadarToken: String? {

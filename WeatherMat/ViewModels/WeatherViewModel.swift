@@ -237,10 +237,15 @@ final class WeatherViewModel {
         let lastAt = defaults.object(forKey: lastWarmedRadarAtKey) as? Date
         let fresh = lastAt.map { Date().timeIntervalSince($0) < radarWarmCooldown } ?? false
         guard !(sameCoord && fresh) else { return }
-        defaults.set(coord, forKey: lastWarmedRadarKey)
-        defaults.set(Date(), forKey: lastWarmedRadarAtKey)
+        let warmedRadarKey = lastWarmedRadarKey
+        let warmedRadarAtKey = lastWarmedRadarAtKey
         Task.detached(priority: .utility) {
-            await RainRadarService.warmLocation(latitude: loc.latitude, longitude: loc.longitude)
+            let warmed = await RainRadarService.warmLocation(latitude: loc.latitude, longitude: loc.longitude)
+            guard warmed else { return }
+            await MainActor.run {
+                UserDefaults.standard.set(coord, forKey: warmedRadarKey)
+                UserDefaults.standard.set(Date(), forKey: warmedRadarAtKey)
+            }
         }
     }
 
@@ -259,10 +264,15 @@ final class WeatherViewModel {
         let lastAt = defaults.object(forKey: lastWarmedAllAtKey) as? Date
         let fresh = lastAt.map { Date().timeIntervalSince($0) < radarWarmCooldown } ?? false
         guard !(sameSet && fresh) else { return }
-        defaults.set(signature, forKey: lastWarmedAllKey)
-        defaults.set(Date(), forKey: lastWarmedAllAtKey)
+        let warmedAllKey = lastWarmedAllKey
+        let warmedAllAtKey = lastWarmedAllAtKey
         Task.detached(priority: .utility) {
-            await RainRadarService.registerWarmLocations(coords)
+            let warmed = await RainRadarService.registerWarmLocations(coords)
+            guard warmed else { return }
+            await MainActor.run {
+                UserDefaults.standard.set(signature, forKey: warmedAllKey)
+                UserDefaults.standard.set(Date(), forKey: warmedAllAtKey)
+            }
         }
     }
 

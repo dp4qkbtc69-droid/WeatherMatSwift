@@ -12,6 +12,8 @@ private struct RegionFrameRenderPlan: Sendable {
     let readinessFrameIDs: [String: String]
 }
 
+private let regionRenderWindowRadius = 8
+
 private struct RegionPackRequest {
     let center: CLLocationCoordinate2D
     let kilometers: Double
@@ -227,7 +229,7 @@ struct RainRadarScreen: View {
         }
         .task(id: location?.id) {
             guard let location else { return }
-            await RainRadarService.warmLocation(latitude: location.latitude, longitude: location.longitude)
+            _ = await RainRadarService.warmLocation(latitude: location.latitude, longitude: location.longitude)
         }
         .task(id: store.isPlaying) {
             guard store.isPlaying else { return }
@@ -303,29 +305,53 @@ struct RainRadarScreen: View {
                     if hasSelectedFrame { break }
                     try? await Task.sleep(nanoseconds: 50_000_000)
                 }
-                let plan = await MainActor.run {
-                    regionRenderPlan(for: pack)
-                }
                 var images: [String: CGImage] = [:]
-                images.reserveCapacity(plan.frames.count)
-                for frame in plan.frames {
+                images.reserveCapacity(regionRenderWindowRadius * 2 + 1)
+                var publishedFirstFrame = false
+                while !Task.isCancelled {
+                    let plan = await MainActor.run {
+                        regionRenderPlan(for: pack)
+                    }
+                    let wantedFrameIDs = Set(plan.frames.map(\.id))
+                    let previousCount = images.count
+                    images = images.filter { wantedFrameIDs.contains($0.key) }
+                    if images.count != previousCount {
+                        let nextSet = RadarRegionRenderSet(pack: pack, images: images)
+                        await MainActor.run {
+                            regionRenderSet = nextSet
+                        }
+                    }
+
+                    var renderedMissingFrame = false
+                    for frame in plan.frames where images[frame.id] == nil {
+                        guard !Task.isCancelled else { return }
+                        guard let rendered = await RadarRegionImageRenderer.renderFrame(frame, pack: pack) else { continue }
+                        renderedMissingFrame = true
+                        images[rendered.frameID] = rendered.image
+                        let nextSet = RadarRegionRenderSet(pack: pack, images: images)
+                        let readinessFrameID = plan.readinessFrameIDs[rendered.frameID]
+                        await MainActor.run {
+                            regionRenderSet = nextSet
+                            if !publishedFirstFrame {
+                                isRegionPackLoading = false
+                            }
+                            store.isBuffering = false
+                        }
+                        publishedFirstFrame = true
+                        if let readinessFrameID {
+                            await RadarTileReadinessCenter.shared.markReady(readinessFrameID)
+                        }
+                    }
                     guard !Task.isCancelled else { return }
-                    guard let rendered = await RadarRegionImageRenderer.renderFrame(frame, pack: pack) else { continue }
-                    images[rendered.frameID] = rendered.image
-                    let nextSet = RadarRegionRenderSet(pack: pack, images: images)
-                    let readinessFrameID = plan.readinessFrameIDs[rendered.frameID]
-                    await MainActor.run {
-                        regionRenderSet = nextSet
-                        store.isBuffering = false
+                    if !renderedMissingFrame {
+                        await MainActor.run {
+                            if !publishedFirstFrame {
+                                isRegionPackLoading = false
+                            }
+                        }
+                        publishedFirstFrame = true
+                        try? await Task.sleep(nanoseconds: 220_000_000)
                     }
-                    if let readinessFrameID {
-                        await RadarTileReadinessCenter.shared.markReady(readinessFrameID)
-                    }
-                }
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    isRegionPackLoading = false
-                    store.isBuffering = false
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -396,19 +422,21 @@ struct RainRadarScreen: View {
         }
         if !visible.isEmpty {
             let start = min(store.selectedIndex, visible.count - 1)
-            if start < visible.count - 1 {
-                for index in (start + 1)..<visible.count {
-                    append(visible[index])
+            for offset in 1...regionRenderWindowRadius {
+                let forwardIndex = start + offset
+                if forwardIndex < visible.count {
+                    append(visible[forwardIndex])
                 }
-            }
-            if start > 0 {
-                for index in stride(from: start - 1, through: 0, by: -1) {
-                    append(visible[index])
+                let backwardIndex = start - offset
+                if backwardIndex >= 0 {
+                    append(visible[backwardIndex])
                 }
             }
         }
-        for frame in pack.frames where seen.insert(frame.id).inserted {
-            orderedIDs.append(frame.id)
+        if orderedIDs.isEmpty {
+            for frame in pack.frames.prefix(regionRenderWindowRadius * 2 + 1) where seen.insert(frame.id).inserted {
+                orderedIDs.append(frame.id)
+            }
         }
 
         return RegionFrameRenderPlan(

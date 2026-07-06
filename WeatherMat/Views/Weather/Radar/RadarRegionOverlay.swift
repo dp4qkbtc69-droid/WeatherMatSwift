@@ -39,7 +39,7 @@ enum RadarRegionImageRenderer {
         }.value
     }
 
-    private static func render(frame: RadarRegionPack.Frame, pack: RadarRegionPack) -> CGImage? {
+    static func render(frame: RadarRegionPack.Frame, pack: RadarRegionPack) -> CGImage? {
         let width = pack.grid.w
         let height = pack.grid.h
         let cellCount = width * height

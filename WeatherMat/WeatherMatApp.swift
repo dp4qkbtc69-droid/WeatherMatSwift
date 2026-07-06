@@ -48,9 +48,6 @@ struct WeatherMatApp: App {
                 .environment(vm)
                 .preferredColorScheme(theme.colorScheme)
                 .tint(Color(hex: "#0ea5e9"))
-                .task {
-                    await NotificationService.shared.requestAuthorization()
-                }
                 .onReceive(
                     NotificationCenter.default.publisher(
                         for: UIApplication.didEnterBackgroundNotification

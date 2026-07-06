@@ -377,6 +377,23 @@ struct SettingsSectionView: View {
                     .padding(.leading, 58)
 
                 SettingsActionRow(
+                    icon: "exclamationmark.triangle.fill",
+                    title: "Unwetterwarnungen aktivieren",
+                    subtitle: "Benachrichtigungen für gespeicherte Orte erlauben",
+                    tint: .red
+                ) {
+                    HapticService.impact(.light)
+                    Task {
+                        await NotificationService.shared.requestAuthorization()
+                        await PushRegistrationService.shared.syncRegistration()
+                    }
+                }
+
+                Divider()
+                    .background(.white.opacity(0.08))
+                    .padding(.leading, 58)
+
+                SettingsActionRow(
                     icon: "arrow.triangle.2.circlepath",
                     title: "Wettercache leeren",
                     subtitle: "Aktive Wetterdaten neu aus allen Quellen laden",
