@@ -156,7 +156,16 @@ final class GeocodingService: Sendable {
         }
         let r = try JSONDecoder().decode(R.self, from: data)
         if let address = r.address {
-            if let name = address.city ?? address.town ?? address.village ?? address.municipality ?? address.hamlet ?? address.suburb ?? address.city_district ?? address.county ?? address.state_district {
+            // Long ??-chains blow up Swift's type-checker under some toolchains
+            // ("unable to type-check this expression in reasonable time") —
+            // an explicit priority array avoids that while keeping the same
+            // fallback order.
+            let candidates = [
+                address.city, address.town, address.village, address.municipality,
+                address.hamlet, address.suburb, address.city_district,
+                address.county, address.state_district,
+            ]
+            if let name = candidates.compactMap({ $0 }).first {
                 return name
             }
         }
