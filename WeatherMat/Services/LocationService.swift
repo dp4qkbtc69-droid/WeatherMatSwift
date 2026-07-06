@@ -1,6 +1,6 @@
 // LocationService.swift
 import Foundation
-import CoreLocation
+@preconcurrency import CoreLocation
 
 @MainActor
 final class LocationService: NSObject, ObservableObject {
