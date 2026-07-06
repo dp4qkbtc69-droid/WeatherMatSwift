@@ -1,5 +1,6 @@
 // LocationsView.swift
 import SwiftUI
+import UserNotifications
 
 struct LocationsView: View {
     @Environment(WeatherViewModel.self) private var vm
@@ -319,6 +320,8 @@ struct SettingsSectionView: View {
     @State private var showResetCalibrationConfirm = false
     @State private var showClearCacheConfirm = false
     @State private var isConnectingNetatmo = false
+    @State private var warningAuthorizationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var isPushActive = PushRegistrationService.isPushActive
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -379,13 +382,20 @@ struct SettingsSectionView: View {
                 SettingsActionRow(
                     icon: "exclamationmark.triangle.fill",
                     title: "Unwetterwarnungen aktivieren",
-                    subtitle: "Benachrichtigungen für gespeicherte Orte erlauben",
+                    subtitle: warningSubtitle,
                     tint: .red
                 ) {
                     HapticService.impact(.light)
+                    if warningAuthorizationStatus == .denied {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                        return
+                    }
                     Task {
                         await NotificationService.shared.requestAuthorization()
                         await PushRegistrationService.shared.syncRegistration()
+                        await refreshWarningStatus()
                     }
                 }
 
@@ -435,6 +445,28 @@ struct SettingsSectionView: View {
         } message: {
             Text("Die App verwirft nur lokale Gewichtungen. Wetterdaten und Orte bleiben erhalten.")
         }
+        .task { await refreshWarningStatus() }
+    }
+
+    private var warningSubtitle: String {
+        switch warningAuthorizationStatus {
+        case .denied:
+            return "iOS-Mitteilungen deaktiviert – zum Aktivieren in den iPhone-Einstellungen antippen"
+        case .authorized, .provisional, .ephemeral:
+            return isPushActive
+                ? "Aktiv – Server-Push registriert"
+                : "Aktiv – lokale Warnungen (Server-Push nicht verfügbar)"
+        case .notDetermined:
+            fallthrough
+        @unknown default:
+            return "Benachrichtigungen für gespeicherte Orte erlauben"
+        }
+    }
+
+    private func refreshWarningStatus() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        warningAuthorizationStatus = settings.authorizationStatus
+        isPushActive = PushRegistrationService.isPushActive
     }
 
     private var settingsPrimaryText: Color {
