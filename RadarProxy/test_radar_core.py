@@ -337,5 +337,25 @@ class PushRegistrationTests(unittest.TestCase):
             self.assertTrue(app._severity_title(severity).startswith("DWD"))
 
 
+class TileEndpointTests(unittest.TestCase):
+    """Guards the tile-coordinate validation added to keep the public
+    /tiles endpoint from accepting out-of-range zoom/x/y (bigint zoom would
+    otherwise waste CPU on 2**z before anything else looks at the request)."""
+
+    def setUp(self) -> None:
+        from fastapi.testclient import TestClient
+        self.client = TestClient(app.app)
+        self.headers = {"x-radar-token": "test-token"}
+
+    def test_rejects_zoom_above_maximum(self) -> None:
+        response = self.client.get("/tiles/frame/999/0/0.png", headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+
+    def test_rejects_out_of_range_tile_coordinate(self) -> None:
+        # z=2 has a 4x4 tile grid (0..3); x=4 is out of range for that zoom.
+        response = self.client.get("/tiles/frame/2/4/0.png", headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

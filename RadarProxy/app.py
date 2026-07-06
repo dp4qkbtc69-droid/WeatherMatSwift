@@ -25,6 +25,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Path as ApiPath
 from PIL import Image, ImageFilter
 from pydantic import BaseModel, Field
 
@@ -275,6 +276,8 @@ _transparent_tile: bytes | None = None
 
 @app.on_event("startup")
 def startup() -> None:
+    if not RADAR_PROXY_TOKEN:
+        logger.warning("RADAR_PROXY_TOKEN is not set — every endpoint is unauthenticated!")
     _load_dynamic_hotspots()
     _start_refresh_loop()
     _start_warning_poll()
@@ -335,9 +338,27 @@ def timeline(request: Request) -> dict:
     }
 
 
+TILE_REQUEST_MAX_ZOOM = 20
+
+
+def _validate_tile_coords(z: int, x: int, y: int) -> None:
+    if not (0 <= z <= TILE_REQUEST_MAX_ZOOM):
+        raise HTTPException(status_code=400, detail="Invalid zoom")
+    tile_count = 2 ** z
+    if not (0 <= x < tile_count) or not (0 <= y < tile_count):
+        raise HTTPException(status_code=400, detail="Invalid tile coordinate")
+
+
 @app.get("/tiles/{frame_id}/{z}/{x}/{y}.png")
-def tile(request: Request, frame_id: str, z: int, x: int, y: int) -> Response:
+def tile(
+    request: Request,
+    frame_id: str,
+    z: int = ApiPath(ge=0, le=TILE_REQUEST_MAX_ZOOM),
+    x: int = ApiPath(ge=0),
+    y: int = ApiPath(ge=0),
+) -> Response:
     _require_token(request)
+    _validate_tile_coords(z, x, y)
     try:
         cache = _ensure_cache()
     except Exception as error:

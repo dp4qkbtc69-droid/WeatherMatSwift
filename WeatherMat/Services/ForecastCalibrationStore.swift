@@ -14,9 +14,14 @@ final class ForecastCalibrationStore: @unchecked Sendable {
     private let samplesKey = "forecastCalibrationSamples_v1"
     private let scoresKey = "forecastCalibrationScores_v1"
     private let latestCurrentKey = "forecastCalibrationLatestCurrent_v1"
+    private let lastSeenKey = "forecastCalibrationLastSeen_v1"
     private let maxSampleAge: TimeInterval = 36 * 3_600
     private let maxSamplesPerLocation = 96
     private let maxLatestCurrentAge: TimeInterval = 3 * 3_600
+    /// Locations not revisited in this long (e.g. a GPS fix from a one-off
+    /// trip) are dropped entirely so the store doesn't grow forever across
+    /// coordinates that are never seen again.
+    private let maxLocationInactivity: TimeInterval = 60 * 24 * 3_600
 
     private init() {}
 
@@ -57,11 +62,12 @@ final class ForecastCalibrationStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        let now = Date()
+        pruneStaleLocations(currentKey: locationKey, now: now)
+
         var samples = loadSamples()
         var scores = loadScores()
         var locationScores = scores[locationKey] ?? [:]
-
-        let now = Date()
         var locationSamples = samples[locationKey] ?? []
         let matching = locationSamples.filter { $0.hourBucket == nowBucket }
         guard !matching.isEmpty else {
@@ -179,7 +185,7 @@ final class ForecastCalibrationStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        var latest = loadLatestCurrent()
+        let latest = loadLatestCurrent()
         guard let current = latest[locationKey],
               Date().timeIntervalSince(current.createdAt) <= maxLatestCurrentAge
         else { return }
@@ -197,8 +203,6 @@ final class ForecastCalibrationStore: @unchecked Sendable {
 
         scores[locationKey] = locationScores
         saveScores(scores)
-        latest[locationKey] = current
-        saveLatestCurrent(latest)
     }
 
     private struct CurrentSnapshot: Codable {
@@ -337,6 +341,51 @@ final class ForecastCalibrationStore: @unchecked Sendable {
         if let data = try? JSONEncoder().encode(latest) {
             defaults.set(data, forKey: latestCurrentKey)
         }
+    }
+
+    private func loadLastSeen() -> [String: Date] {
+        guard let data = defaults.data(forKey: lastSeenKey),
+              let decoded = try? JSONDecoder().decode([String: Date].self, from: data)
+        else { return [:] }
+        return decoded
+    }
+
+    private func saveLastSeen(_ lastSeen: [String: Date]) {
+        if let data = try? JSONEncoder().encode(lastSeen) {
+            defaults.set(data, forKey: lastSeenKey)
+        }
+    }
+
+    /// Marks `currentKey` as seen, then drops all calibration data (samples,
+    /// scores, latest-current snapshot) for any location not seen within
+    /// `maxLocationInactivity` — otherwise every GPS fix from a one-off trip
+    /// leaves a permanent, never-pruned entry in these dictionaries. Must be
+    /// called with `lock` already held.
+    private func pruneStaleLocations(currentKey: String, now: Date) {
+        var lastSeen = loadLastSeen()
+        lastSeen[currentKey] = now
+        let staleKeys = lastSeen
+            .filter { now.timeIntervalSince($0.value) > maxLocationInactivity }
+            .map(\.key)
+        guard !staleKeys.isEmpty else {
+            saveLastSeen(lastSeen)
+            return
+        }
+
+        for key in staleKeys { lastSeen.removeValue(forKey: key) }
+        saveLastSeen(lastSeen)
+
+        var samples = loadSamples()
+        var scores = loadScores()
+        var latest = loadLatestCurrent()
+        for key in staleKeys {
+            samples.removeValue(forKey: key)
+            scores.removeValue(forKey: key)
+            latest.removeValue(forKey: key)
+        }
+        saveSamples(samples)
+        saveScores(scores)
+        saveLatestCurrent(latest)
     }
 
     private func hourBucket(_ date: Date) -> Int {
