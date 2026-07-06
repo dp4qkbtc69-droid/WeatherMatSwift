@@ -18,8 +18,11 @@ final class NotificationService: NSObject {
 
     // MARK: - Permission
     func requestAuthorization() async {
+        // Critical Alerts require Apple's separate entitlement approval. Until
+        // that is provisioned, requesting `.criticalAlert` makes the whole
+        // authorization call fail, including normal alert/sound/badge consent.
         let granted = (try? await UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound, .badge, .criticalAlert])) ?? false
+            .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         if granted {
             // Device token arrives via AppDelegate and is forwarded to the proxy.
             UIApplication.shared.registerForRemoteNotifications()
