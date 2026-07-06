@@ -260,7 +260,10 @@ struct RadarTimelineControl: View {
         return date.formatted(.dateTime.day().month(.twoDigits).locale(.init(identifier: "de_DE")))
     }
 
-    static func makeBuckets(_ frames: [RainRadarFrame], calendar: Calendar = .current) -> [DayBucket] {
+    // Pure data logic, no UI access — nonisolated so it stays callable from a
+    // synchronous, non-@MainActor context (e.g. plain unit tests) instead of
+    // inheriting @MainActor isolation from this View conformance.
+    nonisolated static func makeBuckets(_ frames: [RainRadarFrame], calendar: Calendar = .current) -> [DayBucket] {
         guard !frames.isEmpty else { return [] }
         var buckets: [DayBucket] = []
         var start = 0
@@ -272,7 +275,7 @@ struct RadarTimelineControl: View {
         return buckets
     }
 
-    private static func bucket(start: Int, end: Int, frames: [RainRadarFrame], calendar: Calendar) -> DayBucket {
+    private nonisolated static func bucket(start: Int, end: Int, frames: [RainRadarFrame], calendar: Calendar) -> DayBucket {
         let date = frames[start].time
         let short: String
         if calendar.isDateInToday(date) {
