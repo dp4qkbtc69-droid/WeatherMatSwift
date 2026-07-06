@@ -1,8 +1,8 @@
 // WeatherKitService.swift
 // Requires: WeatherKit capability in Xcode + signed entitlement (developer.apple.com)
 import Foundation
-import CoreLocation
-import WeatherKit
+@preconcurrency import CoreLocation
+@preconcurrency import WeatherKit
 import os
 
 final class WeatherKitService: WeatherProviding, @unchecked Sendable {

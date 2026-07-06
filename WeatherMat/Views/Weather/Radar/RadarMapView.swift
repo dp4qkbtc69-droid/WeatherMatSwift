@@ -1,6 +1,6 @@
 // RadarMapView.swift
 import SwiftUI
-import MapKit
+@preconcurrency import MapKit
 import UIKit
 
 enum DwdWMSLayer: String, Identifiable {

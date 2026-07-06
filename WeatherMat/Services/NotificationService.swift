@@ -1,6 +1,6 @@
 // NotificationService.swift
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 import UIKit
 
 @MainActor
