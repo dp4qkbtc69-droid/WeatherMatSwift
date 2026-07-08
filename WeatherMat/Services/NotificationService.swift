@@ -29,6 +29,15 @@ final class NotificationService: NSObject {
         }
     }
 
+    // MARK: - Status
+    /// `UNNotificationSettings` isn't `Sendable`, so callers outside this
+    /// `@preconcurrency`-imported file can't await `notificationSettings()`
+    /// directly under Swift 6 strict concurrency — extract just the
+    /// (Sendable) authorization status here instead.
+    func currentAuthorizationStatus() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
     // MARK: - Check for new DWD warnings
     func checkWarnings(_ warnings: [DWDWarning]) async {
         // Server push delivers warnings via APNs — skip local duplicates.

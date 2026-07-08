@@ -106,7 +106,8 @@ class PaletteSyncTests(unittest.TestCase):
         )
         if not os.path.exists(swift_path):
             self.skipTest("iOS legend source not available in this checkout")
-        source = open(swift_path, encoding="utf-8").read()
+        with open(swift_path, encoding="utf-8") as handle:
+            source = handle.read()
         block = source.split("static let steps")[1].split("]")[0]
         hexes = re.findall(r'Color\(hex:\s*"#([0-9a-fA-F]{6})"\)', block)
         legend_rgb = [tuple(int(h[i:i + 2], 16) for i in (0, 2, 4)) for h in hexes]

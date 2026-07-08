@@ -464,8 +464,7 @@ struct SettingsSectionView: View {
     }
 
     private func refreshWarningStatus() async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        warningAuthorizationStatus = settings.authorizationStatus
+        warningAuthorizationStatus = await NotificationService.shared.currentAuthorizationStatus()
         isPushActive = PushRegistrationService.isPushActive
     }
 
