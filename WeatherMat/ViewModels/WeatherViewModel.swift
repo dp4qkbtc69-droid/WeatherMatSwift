@@ -364,15 +364,13 @@ final class WeatherViewModel {
     private let gpsCooldown: TimeInterval = 120
     private var lastGPSFix: Date?
 
-    /// Called on app launch: keep the GPS location's data fresh but restore the
-    /// location the user last had open, instead of always snapping to GPS.
+    /// Called on app launch: always shows the current GPS location, so the
+    /// app opens on today's weather where the user actually is rather than
+    /// whichever saved city was last open.
     @MainActor
     func refreshOnLaunch() async {
-        // Preserve the last-shown location only when it's a real saved city;
-        // if GPS was showing (or nothing is saved yet), default to GPS.
-        let keepCurrent = activeLocation.map { !$0.isGPS } ?? false
         warmAllSavedLocations()
-        await useGPSLocation(makeActive: !keepCurrent)
+        await useGPSLocation(makeActive: true)
     }
 
     /// Refreshes the GPS location. When `makeActive` is false the current
