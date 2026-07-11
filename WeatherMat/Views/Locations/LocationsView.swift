@@ -6,6 +6,10 @@ struct LocationsView: View {
     @Environment(WeatherViewModel.self) private var vm
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    /// Called by the close button instead of the default `dismiss()` when
+    /// this view is the permanent iPad sidebar column — there closing means
+    /// collapsing the split view's sidebar, not dismissing a sheet.
+    var onClose: (() -> Void)? = nil
 
     @State private var searchText  = ""
     @State private var results:    [GeocodedLocation] = []
@@ -123,7 +127,9 @@ struct LocationsView: View {
                         .frame(width: 1, height: 22)
                 }
 
-                Button { dismiss() } label: {
+                Button {
+                    if let onClose { onClose() } else { dismiss() }
+                } label: {
                     Image(systemName: "xmark")
                         .font(.system(.subheadline, weight: .bold))
                         .foregroundStyle(headerTextColor)

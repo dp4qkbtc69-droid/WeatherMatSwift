@@ -4,6 +4,11 @@ import SwiftUI
 struct WeatherView: View {
     @Environment(WeatherViewModel.self) private var vm
     @Binding var showLocations: Bool
+    /// Non-nil when shown as the detail pane of an iPad sidebar layout —
+    /// the swipe-between-locations gesture is switched off (the sidebar
+    /// covers that job) and the top bar shows a sidebar-toggle button that
+    /// calls this instead of the iPhone's "open locations sheet" button.
+    var sidebarToggle: (() -> Void)? = nil
 
     @State private var isPullRefreshing = false
     @State private var dragOffset: CGFloat = 0
@@ -43,12 +48,15 @@ struct WeatherView: View {
     // MARK: - Main scroll content
     private func mainScrollView(data: EnsembleWeatherData) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 12) {
+            VStack(spacing: sidebarToggle != nil ? 6 : 12) {
                 // Top bar with location name + pager dots
-                TopBarView(showLocations: $showLocations) {
+                TopBarView(showLocations: $showLocations, sidebarToggle: sidebarToggle) {
                     showRainRadar = true
                 }
-                    .padding(.top, 56)
+                    // iPad sidebar layout isn't in an ignoresSafeArea()
+                    // container (see ContentView), so the safe area already
+                    // clears the status bar correctly on its own.
+                    .padding(.top, sidebarToggle != nil ? 0 : 56)
                     .simultaneousGesture(locationSwipeGesture)
 
                 // Hero: temperature + condition icon
@@ -120,6 +128,7 @@ struct WeatherView: View {
     private var locationSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 40)
             .onEnded { val in
+                guard sidebarToggle == nil else { return }
                 let h = val.translation.width
                 let v = val.translation.height
                 guard abs(h) > abs(v) * 2.0, val.translation.height < 20 else { return }

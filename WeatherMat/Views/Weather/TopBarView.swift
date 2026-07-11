@@ -4,6 +4,7 @@ import SwiftUI
 struct TopBarView: View {
     @Environment(WeatherViewModel.self) private var vm
     @Binding var showLocations: Bool
+    var sidebarToggle: (() -> Void)? = nil
     let openRainRadar: () -> Void
     @State private var showModelDetails = false
     @State private var showFeedbackDialog = false
@@ -43,17 +44,24 @@ struct TopBarView: View {
             // ── Right: locations icon ────────────────────────────────────
             HStack {
                 Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    Button {
-                        showLocations = true
-                    } label: {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(.title3, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
+                VStack(alignment: .trailing, spacing: sidebarToggle != nil ? 4 : 6) {
+                    // On iPad the system already provides a sidebar-reveal
+                    // control (since there's no in-app nav bar for our own
+                    // toolbar item to dock into, .toolbar(removing:) can't
+                    // reach it) — a second, custom button here would just be
+                    // a redundant, easy-to-miss duplicate, so it's skipped.
+                    if sidebarToggle == nil {
+                        Button {
+                            showLocations = true
+                        } label: {
+                            Image(systemName: "mappin.and.ellipse")
+                                .font(.system(.title3, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     if let data = vm.weatherData {
                         ModelStatusButton(
