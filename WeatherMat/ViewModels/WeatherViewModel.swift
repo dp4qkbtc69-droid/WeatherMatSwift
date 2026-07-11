@@ -215,6 +215,9 @@ final class WeatherViewModel {
     @MainActor
     func refreshOnForeground() async {
         guard let loc = activeLocation else { return }
+        // Retried here too (not just on save) since WCSession activation is
+        // async and may not be ready yet at cold launch.
+        WatchConnectivityService.shared.syncLocations(savedLocations)
         prewarmRadarIfNeeded(for: loc)
         if let last = lastForegroundRefresh,
            Date().timeIntervalSince(last) < foregroundRefreshCooldown {
@@ -467,6 +470,7 @@ final class WeatherViewModel {
         if let data = try? JSONEncoder().encode(savedLocations) {
             UserDefaults.standard.set(data, forKey: udKey)
         }
+        WatchConnectivityService.shared.syncLocations(savedLocations)
         // Keep the warning-push registration in sync with the saved locations.
         Task { @MainActor in
             await PushRegistrationService.shared.syncRegistration()

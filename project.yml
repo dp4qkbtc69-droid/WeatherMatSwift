@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: de.praxishartlep
   deploymentTarget:
     iOS: "17.0"
+    watchOS: "11.0"
   xcodeVersion: "26.6"
   createIntermediateGroups: true
 
@@ -93,6 +94,88 @@ targets:
       - sdk: BackgroundTasks.framework
       - sdk: AuthenticationServices.framework
       - sdk: Security.framework
+      - sdk: WatchConnectivity.framework
+      - target: WeatherMatWatch
+        embed: true
+
+  # ── watchOS Companion App ─────────────────────────────────────────────────
+  WeatherMatWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: WeatherMatWatch/App
+      - path: WeatherMatWatch/Shared
+    info:
+      path: WeatherMatWatch/App/Info.plist
+      properties:
+        CFBundleDisplayName: WeatherMat
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: de.praxishartlep.weathermat
+        NSLocationWhenInUseUsageDescription: "WeatherMat benötigt deinen Standort für lokale Wetterdaten auf der Uhr."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    entitlements:
+      path: WeatherMatWatch/App/WeatherMatWatch.entitlements
+      properties:
+        com.apple.developer.weatherkit: true
+        com.apple.security.application-groups:
+          - group.de.praxishartlep.weathermat.watch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.praxishartlep.weathermat.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        INFOPLIST_FILE: WeatherMatWatch/App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WeatherMatWatch/App/WeatherMatWatch.entitlements
+        SDKROOT: watchos
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+    dependencies:
+      - sdk: WeatherKit.framework
+      - sdk: CoreLocation.framework
+      - sdk: WatchConnectivity.framework
+      - sdk: WidgetKit.framework
+      - target: WeatherMatWatchWidgets
+        embed: true
+
+  # ── watchOS Complication (WidgetKit) ──────────────────────────────────────
+  WeatherMatWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: WeatherMatWatch/Widgets
+      - path: WeatherMatWatch/Shared
+    info:
+      path: WeatherMatWatch/Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: WeatherMat
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: WeatherMatWatch/Widgets/WeatherMatWatchWidgets.entitlements
+      properties:
+        com.apple.developer.weatherkit: true
+        com.apple.security.application-groups:
+          - group.de.praxishartlep.weathermat.watch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.praxishartlep.weathermat.watchkitapp.widgets
+        TARGETED_DEVICE_FAMILY: "4"
+        INFOPLIST_FILE: WeatherMatWatch/Widgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WeatherMatWatch/Widgets/WeatherMatWatchWidgets.entitlements
+        SDKROOT: watchos
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    dependencies:
+      - sdk: WeatherKit.framework
+      - sdk: CoreLocation.framework
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
 
   WeatherMatTests:
     type: bundle.unit-test
