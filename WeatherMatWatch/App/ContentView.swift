@@ -51,6 +51,7 @@ struct ContentView: View {
                 .padding(.horizontal)
                 .frame(maxWidth: .infinity)
             }
+            .refreshable { await vm.refresh() }
             .navigationTitle(vm.selectedLocationName)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -64,7 +65,6 @@ struct ContentView: View {
             .sheet(isPresented: $showingLocationPicker) {
                 LocationPickerView()
             }
-            .refreshable { await vm.refresh() }
             .task { await vm.refreshOnAppear() }
         }
     }
