@@ -210,8 +210,11 @@ final class WeatherViewModel {
     private let radarWarmCooldown: TimeInterval = 15 * 60
 
     /// Called when the app becomes active (cold start and foreground return):
-    /// refreshes the active location's weather so no manual pull-to-refresh is
-    /// needed, and pre-warms radar tiles for it in the background.
+    /// re-acquires the current GPS position (same "always show here" policy
+    /// as refreshOnLaunch — that one only fires on a true cold start, since
+    /// ContentView's .task doesn't re-run when the app is merely resumed
+    /// from the background) so no manual pull-to-refresh is needed, and
+    /// pre-warms radar tiles in the background.
     @MainActor
     func refreshOnForeground() async {
         guard let loc = activeLocation else { return }
@@ -224,7 +227,7 @@ final class WeatherViewModel {
             return
         }
         lastForegroundRefresh = Date()
-        await loadWeather(for: loc, force: true)
+        await useGPSLocation(makeActive: true)
     }
 
     /// Asks the radar proxy to render this location's tiles ahead of the user
