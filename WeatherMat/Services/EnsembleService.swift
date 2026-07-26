@@ -322,6 +322,8 @@ final class EnsembleService: Sendable {
             var highW = 0.0, lowW = 0.0, precipProbW = 0.0, precipSumW = 0.0
             var windMaxW = 0.0, uvMaxW = 0.0, sunshineW = 0.0, totalW = 0.0
             var conditionVotes: [(code: Int, weight: Double)] = []
+            var highValues: [Double] = []
+            var lowValues: [Double] = []
             for m in all {
                 guard let w     = hw[m.modelName],
                       let match = dailyIndices[m.modelName]?[bucket] else { continue }
@@ -334,6 +336,8 @@ final class EnsembleService: Sendable {
                 sunshineW   += match.sunshineDuration * w
                 totalW  += w
                 conditionVotes.append((match.wmoCode, w))
+                highValues.append(match.high)
+                lowValues.append(match.low)
             }
             let daylightSource = ["WeatherKit", "OpenMeteo", "OpenMeteo-ICON", "ECMWF"]
                 .compactMap { dailyIndices[$0]?[bucket] }
@@ -341,11 +345,17 @@ final class EnsembleService: Sendable {
             let s = totalW > 0 ? 1.0 / totalW : 1.0
             let wmo = votedWMO(entries: conditionVotes, fallback: base.wmoCode)
             let cond = WMOCode.condition(for: wmo)
+            let highAvg = Int((highW * s).rounded())
+            let lowAvg  = Int((lowW  * s).rounded())
             return DailyEntry(
                 date:                     base.date,
                 condition:                cond,
-                high:                     Int((highW * s).rounded()),
-                low:                      Int((lowW  * s).rounded()),
+                high:                     highAvg,
+                low:                      lowAvg,
+                highMin:                  Int((highValues.min() ?? Double(highAvg)).rounded()),
+                highMax:                  Int((highValues.max() ?? Double(highAvg)).rounded()),
+                lowMin:                   Int((lowValues.min()  ?? Double(lowAvg)).rounded()),
+                lowMax:                   Int((lowValues.max()  ?? Double(lowAvg)).rounded()),
                 precipitationProbability: Int((precipProbW * s).rounded()),
                 precipitationSum:         precipSumW * s,
                 sunrise:                  daylightSource?.sunrise ?? base.sunrise ?? Date(),
@@ -607,6 +617,7 @@ final class EnsembleService: Sendable {
 
     private func placeholderDay(from cur: CurrentWeather) -> DailyEntry {
         DailyEntry(date: Date(), condition: cur.condition, high: cur.temp, low: cur.temp,
+                   highMin: cur.temp, highMax: cur.temp, lowMin: cur.temp, lowMax: cur.temp,
                    precipitationProbability: 0, precipitationSum: 0,
                    sunrise: Date(), sunset: Date(), uvMax: cur.uvIndex, windMax: cur.windSpeed,
                    sunshineDuration: 0)
@@ -622,7 +633,8 @@ extension EnsembleWeatherData {
             airQuality: nil, stationObservation: nil, stationObservations: [],
             condition: WMOCode.condition(for: 0), background: .sunny),
         today: DailyEntry(date: Date(), condition: WMOCode.condition(for: 0),
-                          high: 0, low: 0, precipitationProbability: 0, precipitationSum: 0,
+                          high: 0, low: 0, highMin: 0, highMax: 0, lowMin: 0, lowMax: 0,
+                          precipitationProbability: 0, precipitationSum: 0,
                           sunrise: Date(), sunset: Date(), uvMax: 0, windMax: 0, sunshineDuration: 0),
         hourly: [], daily: [],
         rain: RainAnalysis(type: .clear, text: "", sub: "", sfSymbol: "sun.max.fill",

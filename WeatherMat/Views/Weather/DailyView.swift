@@ -129,6 +129,35 @@ struct DailyRowView: View {
         Self.dateFormatter.string(from: day.date)
     }
 
+    /// Beyond ~3 days out, models disagree enough that a single-degree number
+    /// overstates how well this is actually known. Below that threshold, or
+    /// when the models happen to agree closely, the plain point value stays.
+    private var showsRange: Bool {
+        confidence == .low && (day.highMax - day.highMin >= 2 || day.lowMax - day.lowMin >= 2)
+    }
+
+    private var highText: String {
+        showsRange ? "\(day.highMin)–\(day.highMax)°" : "\(day.high)°"
+    }
+
+    private var lowText: String {
+        showsRange ? "\(day.lowMin)–\(day.lowMax)°" : "\(day.low)°"
+    }
+
+    private var confidenceAccessibilityHint: String? {
+        confidence == .low ? "Prognose für diesen Tag noch unsicher" : nil
+    }
+
+    private var dailyAccessibilityLabel: String {
+        var label = "\(dayLabel) \(dateLabel), \(day.condition.label), "
+        label += "Höchstwert \(day.high) Grad, Tiefstwert \(day.low) Grad, "
+        label += "\(day.precipitationProbability) Prozent Niederschlag, Wind bis \(day.windMax) km/h"
+        if let hint = confidenceAccessibilityHint {
+            label += ", \(hint)"
+        }
+        return label
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -178,25 +207,25 @@ struct DailyRowView: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 6) {
-                Text("\(day.low)°")
-                    .font(.system(.callout, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.76))
+                Text(lowText)
+                    .font(.system(.callout, weight: showsRange ? .medium : .semibold))
+                    .foregroundStyle(.white.opacity(showsRange ? 0.6 : 0.76))
                     .monospacedDigit()
                     .lineLimit(1)
-                    .fixedSize()
-                    .frame(width: 30, alignment: .trailing)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: showsRange ? 44 : 30, alignment: .trailing)
 
                 TempBarView(low: day.low, high: day.high,
                             allLow: allLow, allHigh: allHigh)
                     .frame(width: 60, height: 6)
 
-                Text("\(day.high)°")
-                    .font(.system(.headline, weight: .bold))
-                    .foregroundStyle(.white)
+                Text(highText)
+                    .font(.system(.headline, weight: showsRange ? .semibold : .bold))
+                    .foregroundStyle(.white.opacity(showsRange ? 0.82 : 1))
                     .monospacedDigit()
                     .lineLimit(1)
-                    .fixedSize()
-                    .frame(width: 30, alignment: .leading)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: showsRange ? 44 : 30, alignment: .leading)
             }
         }
         .padding(.horizontal, 16)
@@ -213,11 +242,7 @@ struct DailyRowView: View {
         .contentShape(Rectangle())
         .animation(.easeInOut(duration: 0.15), value: isSelected)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(dayLabel) \(dateLabel), \(day.condition.label), "
-            + "Höchstwert \(day.high) Grad, Tiefstwert \(day.low) Grad, "
-            + "\(day.precipitationProbability) Prozent Niederschlag, Wind bis \(day.windMax) km/h"
-        )
+        .accessibilityLabel(dailyAccessibilityLabel)
         .accessibilityValue(isSelected ? "ausgewählt" : "")
         .accessibilityHint("Tippen für Stundenansicht dieses Tages")
     }

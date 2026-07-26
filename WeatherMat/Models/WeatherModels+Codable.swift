@@ -32,7 +32,7 @@ extension HourlyEntry {
 // MARK: - DailyEntry (exclude auto-generated id)
 extension DailyEntry {
     enum CodingKeys: String, CodingKey {
-        case date, condition, high, low, precipitationProbability
+        case date, condition, high, low, highMin, highMax, lowMin, lowMax, precipitationProbability
         case precipitationSum, sunrise, sunset, uvMax, windMax, sunshineDuration
     }
     public init(from decoder: Decoder) throws {
@@ -41,6 +41,12 @@ extension DailyEntry {
         condition                = try c.decode(WMOCondition.self,  forKey: .condition)
         high                     = try c.decode(Int.self,          forKey: .high)
         low                      = try c.decode(Int.self,          forKey: .low)
+        // decodeIfPresent + default so previously cached blobs (written before
+        // these fields existed) still decode instead of losing the whole cache.
+        highMin                  = try c.decodeIfPresent(Int.self, forKey: .highMin) ?? high
+        highMax                  = try c.decodeIfPresent(Int.self, forKey: .highMax) ?? high
+        lowMin                   = try c.decodeIfPresent(Int.self, forKey: .lowMin)  ?? low
+        lowMax                   = try c.decodeIfPresent(Int.self, forKey: .lowMax)  ?? low
         precipitationProbability = try c.decode(Int.self,          forKey: .precipitationProbability)
         precipitationSum         = try c.decode(Double.self,       forKey: .precipitationSum)
         sunrise                  = try c.decode(Date.self,         forKey: .sunrise)
@@ -55,6 +61,10 @@ extension DailyEntry {
         try c.encode(condition,                 forKey: .condition)
         try c.encode(high,                      forKey: .high)
         try c.encode(low,                       forKey: .low)
+        try c.encode(highMin,                   forKey: .highMin)
+        try c.encode(highMax,                   forKey: .highMax)
+        try c.encode(lowMin,                    forKey: .lowMin)
+        try c.encode(lowMax,                    forKey: .lowMax)
         try c.encode(precipitationProbability,  forKey: .precipitationProbability)
         try c.encode(precipitationSum,          forKey: .precipitationSum)
         try c.encode(sunrise,                   forKey: .sunrise)

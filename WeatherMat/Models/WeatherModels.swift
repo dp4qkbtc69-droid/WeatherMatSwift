@@ -123,6 +123,14 @@ struct DailyEntry: Identifiable, Codable {
     let condition:              WMOCondition
     let high:                   Int
     let low:                    Int
+    /// Min/max of `high`/`low` across the contributing models for this day —
+    /// the model disagreement (not the weighted average). Equal to `high`/`low`
+    /// when only one model reaches this far out. Used to show a range instead
+    /// of a false-precision point value for low-confidence (far-out) days.
+    let highMin:                Int
+    let highMax:                Int
+    let lowMin:                 Int
+    let lowMax:                 Int
     let precipitationProbability: Int
     let precipitationSum:       Double
     let sunrise:                Date
