@@ -49,7 +49,7 @@ struct WeatherMatSwiftTesting {
 
     @Test("WMO code produces distinct day and night symbols")
     func wmoCodeProducesDistinctDayAndNightSymbols() {
-        let condition = WMOCode.condition(for: 0, isDay: true)
+        let condition = WMOCode.condition(for: 0)
 
         #expect(!condition.label.isEmpty)
         #expect(!condition.sfSymbol.isEmpty)

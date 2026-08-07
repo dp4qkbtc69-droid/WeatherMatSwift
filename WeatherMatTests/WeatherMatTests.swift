@@ -43,7 +43,7 @@ final class WeatherMatTests: XCTestCase {
     }
 
     func testWMOCodeProducesDistinctDayAndNightSymbols() {
-        let condition = WMOCode.condition(for: 0, isDay: true)
+        let condition = WMOCode.condition(for: 0)
 
         XCTAssertFalse(condition.label.isEmpty)
         XCTAssertFalse(condition.sfSymbol.isEmpty)

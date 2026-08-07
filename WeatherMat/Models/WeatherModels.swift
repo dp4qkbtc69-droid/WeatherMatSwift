@@ -18,8 +18,44 @@ struct CurrentWeather: Codable {
     let airQuality:     AirQuality?
     let stationObservation: NetatmoObservation?
     let stationObservations: [NetatmoObservation]
+    let waterTemperature: WaterTemperatureData?
+    let tide:           TideData?
     let condition:      WMOCondition
     let background:     WeatherBackground
+}
+
+// MARK: - Water temperature (coastal locations only — nil inland)
+struct WaterTemperatureData: Codable, Equatable {
+    let temperature: Double   // °C
+    let measuredAt:  Date
+
+    var label: String {
+        switch temperature {
+        case ..<12:   return "Kalt"
+        case 12..<17: return "Frisch"
+        case 17..<21: return "Angenehm"
+        case 21..<25: return "Warm"
+        default:      return "Sehr warm"
+        }
+    }
+}
+
+// MARK: - Tide (coastal locations with a meaningful tidal range only — nil
+// inland and for near-tideless seas like the Baltic).
+struct TideData: Codable, Equatable {
+    enum TideType: String, Codable { case high, low }
+
+    struct Event: Codable, Equatable {
+        let type:   TideType
+        let time:   Date
+        let height: Double   // metres above mean sea level
+    }
+
+    let currentHeight: Double
+    /// Chronological, next 1–2 tide turning points from now.
+    let nextEvents: [Event]
+
+    var next: Event? { nextEvents.first }
 }
 
 

@@ -81,6 +81,13 @@ struct WeatherView: View {
                     .padding(.horizontal)
                     .simultaneousGesture(locationSwipeGesture)
 
+                // Sea surface temperature — only rendered for coastal locations.
+                if let waterTemperature = data.current.waterTemperature {
+                    WaterTemperatureCardView(data: waterTemperature, tide: data.current.tide)
+                        .padding(.horizontal)
+                        .simultaneousGesture(locationSwipeGesture)
+                }
+
                 // Hourly forecast
                 HourlyView(entries: vm.hourlyForActiveView, label: vm.hourlyLabel)
 

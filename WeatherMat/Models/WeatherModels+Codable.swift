@@ -79,7 +79,8 @@ extension DailyEntry {
 extension CurrentWeather {
     enum CodingKeys: String, CodingKey {
         case temp, feelsLike, humidity, cloudCover, windSpeed, windDirection
-        case pressure, visibility, uvIndex, isDay, precipitation, airQuality, stationObservation, stationObservations, condition, background
+        case pressure, visibility, uvIndex, isDay, precipitation, airQuality, stationObservation, stationObservations
+        case waterTemperature, tide, condition, background
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -97,6 +98,10 @@ extension CurrentWeather {
         airQuality    = try  c.decodeIfPresent(AirQuality.self, forKey: .airQuality)
         stationObservation = try c.decodeIfPresent(NetatmoObservation.self, forKey: .stationObservation)
         stationObservations = try c.decodeIfPresent([NetatmoObservation].self, forKey: .stationObservations) ?? stationObservation.map { [$0] } ?? []
+        // decodeIfPresent so previously cached blobs (written before this
+        // field existed) still decode instead of losing the whole cache.
+        waterTemperature = try c.decodeIfPresent(WaterTemperatureData.self, forKey: .waterTemperature)
+        tide          = try  c.decodeIfPresent(TideData.self,  forKey: .tide)
         condition     = try  c.decode(WMOCondition.self,       forKey: .condition)
         background    = try  c.decode(WeatherBackground.self,  forKey: .background)
     }
@@ -116,6 +121,8 @@ extension CurrentWeather {
         try c.encodeIfPresent(airQuality, forKey: .airQuality)
         try c.encodeIfPresent(stationObservation, forKey: .stationObservation)
         try c.encode(stationObservations, forKey: .stationObservations)
+        try c.encodeIfPresent(waterTemperature, forKey: .waterTemperature)
+        try c.encodeIfPresent(tide, forKey: .tide)
         try c.encode(condition,     forKey: .condition)
         try c.encode(background,    forKey: .background)
     }

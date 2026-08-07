@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2660"
+   LastUpgradeVersion = "2700"
    wasCreatedForAppExtension = "YES"
    version = "2.0">
    <BuildAction
@@ -112,7 +112,6 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2DC6F96D3F97515607B99E0D"
             BuildableName = "WeatherMatWatchWidgets.appex"
-            BlueprintName = "WeatherMatWatchWidgets"
             ReferencedContainer = "container:WeatherMat.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

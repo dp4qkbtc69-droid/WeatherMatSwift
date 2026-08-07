@@ -44,13 +44,19 @@ final class EnsembleService: Sendable {
         async let stationObservations = try? await withTimeout(seconds: 8) {
             try await NetatmoService.shared.fetchNearestObservations(for: location)
         }
+        // nil for inland locations — the marine model has no sea grid cell
+        // nearby, which WaterTemperatureService reports as "no data", not an error.
+        async let marineConditions = try? await withTimeout(seconds: 6) {
+            try await WaterTemperatureService.shared.fetch(for: location)
+        }
 
         return combine(
             results: results,
             location: location,
             warnings: await warnings,
             airQuality: await airQuality,
-            stationObservations: await stationObservations ?? []
+            stationObservations: await stationObservations ?? [],
+            marineConditions: await marineConditions
         )
     }
 
@@ -60,7 +66,8 @@ final class EnsembleService: Sendable {
         location: CLLocation,
         warnings: [DWDWarning],
         airQuality: AirQuality?,
-        stationObservations: [NetatmoObservation]
+        stationObservations: [NetatmoObservation],
+        marineConditions: MarineConditions?
     ) -> EnsembleWeatherData {
         guard !results.isEmpty else { return .empty }
 
@@ -121,6 +128,8 @@ final class EnsembleService: Sendable {
             airQuality:    airQuality,
             stationObservation: stationObservations.preferredCalibrationObservation,
             stationObservations: stationObservations,
+            waterTemperature: marineConditions?.waterTemperature,
+            tide:          marineConditions?.tide,
             condition:     cond,
             background:    currentIsDay ? cond.background : .nightClear
         )
@@ -631,6 +640,7 @@ extension EnsembleWeatherData {
             temp: 0, feelsLike: 0, humidity: 0, cloudCover: 0, windSpeed: 0, windDirection: 0,
             pressure: 0, visibility: 0, uvIndex: 0, isDay: true, precipitation: 0,
             airQuality: nil, stationObservation: nil, stationObservations: [],
+            waterTemperature: nil, tide: nil,
             condition: WMOCode.condition(for: 0), background: .sunny),
         today: DailyEntry(date: Date(), condition: WMOCode.condition(for: 0),
                           high: 0, low: 0, highMin: 0, highMax: 0, lowMin: 0, lowMax: 0,

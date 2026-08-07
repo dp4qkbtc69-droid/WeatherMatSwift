@@ -54,7 +54,7 @@ actor RadarTileReadinessCenter {
                     continuations[frameID, default: [:]][waitID] = continuation
                     Task {
                         try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                        await self.resumeContinuation(for: frameID, waitID: waitID)
+                        self.resumeContinuation(for: frameID, waitID: waitID)
                     }
                 }
             }
