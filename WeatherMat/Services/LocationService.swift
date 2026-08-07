@@ -3,7 +3,7 @@ import Foundation
 @preconcurrency import CoreLocation
 
 @MainActor
-final class LocationService: NSObject, ObservableObject {
+final class LocationService: NSObject {
 
     static let shared = LocationService()
     private let manager = CLLocationManager()

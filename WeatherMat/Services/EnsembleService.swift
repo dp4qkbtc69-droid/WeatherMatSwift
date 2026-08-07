@@ -102,7 +102,7 @@ final class EnsembleService: Sendable {
         let currentWMO  = votedCurrentWMO(results: results, baseWeights: weights,
                                           avgCloudCover: cloudCoverW)
         let currentIsDay = votedBool(results.map { ($0.currentIsDay, currentWeights[$0.modelName] ?? 0) })
-        let cond    = WMOCode.condition(for: currentWMO, isDay: currentIsDay)
+        let cond    = WMOCode.condition(for: currentWMO)
 
         let rain = analyzeRain(results: results, baseWeights: weights, confidence: rainConfidence)
 
@@ -291,7 +291,7 @@ final class EnsembleService: Sendable {
             let s = totalW > 0 ? 1.0 / totalW : 1.0
             let isDay = votedBool(isDayVotes.isEmpty ? [(base.isDay, 1)] : isDayVotes)
             let wmo = votedWMO(entries: conditionVotes, fallback: base.wmoCode)
-            let cond = WMOCode.condition(for: wmo, isDay: isDay)
+            let cond = WMOCode.condition(for: wmo)
             return HourlyEntry(
                 time:                     base.time,
                 temp:                     Int((tempW * s).rounded()),
@@ -642,17 +642,4 @@ extension EnsembleWeatherData {
                            severity: .light),
         warnings: [], agreementPct: 0, confidence: .medium, confidenceBands: [], activeModels: []
     )
-}
-
-
-
-private extension Array where Element == NetatmoObservation {
-    var preferredCalibrationObservation: NetatmoObservation? {
-        let fresh = filter(\.isFresh)
-        return fresh.first { $0.moduleType == "NAModule1" && $0.temperature != nil } ??
-        fresh.first { $0.temperature != nil && $0.humidity != nil } ??
-        fresh.first { $0.rainRate != nil } ??
-        fresh.first { $0.windSpeed != nil } ??
-        fresh.first
-    }
 }

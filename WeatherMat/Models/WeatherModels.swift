@@ -84,6 +84,20 @@ struct NetatmoObservation: Codable {
     }
 }
 
+// MARK: - Netatmo calibration preference
+// Single shared definition — used by both NetatmoService (station selection)
+// and EnsembleService (forecast calibration).
+extension Array where Element == NetatmoObservation {
+    var preferredCalibrationObservation: NetatmoObservation? {
+        let fresh = filter(\.isFresh)
+        return fresh.first { $0.moduleType == "NAModule1" && $0.temperature != nil } ??
+        fresh.first { $0.temperature != nil && $0.humidity != nil } ??
+        fresh.first { $0.rainRate != nil } ??
+        fresh.first { $0.windSpeed != nil } ??
+        fresh.first
+    }
+}
+
 // MARK: - Air Quality
 struct AirQuality: Codable {
     let europeanAQI:     Int

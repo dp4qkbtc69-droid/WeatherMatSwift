@@ -326,6 +326,7 @@ struct SettingsSectionView: View {
     @State private var showResetCalibrationConfirm = false
     @State private var showClearCacheConfirm = false
     @State private var isConnectingNetatmo = false
+    @State private var netatmoErrorMessage: String?
     @State private var warningAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     @State private var isPushActive = PushRegistrationService.isPushActive
 
@@ -376,8 +377,20 @@ struct SettingsSectionView: View {
                     isConnectingNetatmo = true
                     Task {
                         defer { Task { @MainActor in isConnectingNetatmo = false } }
-                        try? await NetatmoService.shared.authenticate()
-                        await vm.refresh()
+                        do {
+                            try await NetatmoService.shared.authenticate()
+                            await vm.refresh()
+                        } catch {
+                            // User-cancelled OAuth sheet isn't a failure worth an alert.
+                            let nsError = error as NSError
+                            let isUserCancelled = nsError.domain == "com.apple.AuthenticationServices.WebAuthenticationSession"
+                                && nsError.code == 1
+                            guard !isUserCancelled else { return }
+                            await MainActor.run {
+                                netatmoErrorMessage = (error as? WeatherError)?.errorDescription
+                                    ?? "Verbindung zu Netatmo fehlgeschlagen. Bitte erneut versuchen."
+                            }
+                        }
                     }
                 }
 
@@ -450,6 +463,17 @@ struct SettingsSectionView: View {
             Button("Abbrechen", role: .cancel) {}
         } message: {
             Text("Die App verwirft nur lokale Gewichtungen. Wetterdaten und Orte bleiben erhalten.")
+        }
+        .alert(
+            "Netatmo-Verbindung fehlgeschlagen",
+            isPresented: Binding(
+                get: { netatmoErrorMessage != nil },
+                set: { if !$0 { netatmoErrorMessage = nil } }
+            )
+        ) {
+            Button("OK") { netatmoErrorMessage = nil }
+        } message: {
+            Text(netatmoErrorMessage ?? "")
         }
         .task { await refreshWarningStatus() }
     }

@@ -72,9 +72,13 @@ final class Where2GoService: Sendable {
         return lhs.score > rhs.score
     }
 
+    // Reduced from 3 rings × 12 bearings (37 parallel requests) to 2 rings ×
+    // 8 bearings (17 requests) — still covers the radius in every direction,
+    // just at a coarser resolution, for noticeably less network/battery use
+    // per "Wohin?" lookup.
     private func candidateCoordinates(from origin: CLLocationCoordinate2D, radiusKm: Int) -> [Where2GoCandidate] {
-        let rings = [0.33, 0.66, 1.0].map { Double(radiusKm) * $0 }
-        let bearings = stride(from: 0.0, to: 360.0, by: 30.0)
+        let rings = [0.5, 1.0].map { Double(radiusKm) * $0 }
+        let bearings = stride(from: 0.0, to: 360.0, by: 45.0)
         var candidates: [Where2GoCandidate] = [
             Where2GoCandidate(coordinate: origin, distanceKm: 0, bearing: nil)
         ]
@@ -177,7 +181,7 @@ final class Where2GoService: Sendable {
             sunshineHours: forecast.sunshineDuration / 3600,
             precipitationProbability: Int(forecast.precipitationProbability.rounded()),
             windSpeed: Int(forecast.windMax.rounded()),
-            condition: WMOCode.condition(for: forecast.weatherCode, isDay: true),
+            condition: WMOCode.condition(for: forecast.weatherCode),
             dateLabel: dateLabel(for: forecast.date, window: window)
         )
     }

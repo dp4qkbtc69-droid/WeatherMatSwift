@@ -22,7 +22,7 @@ extension WMOCondition: Codable {
 }
 
 enum WMOCode {
-    static func condition(for code: Int, isDay: Bool = true) -> WMOCondition {
+    static func condition(for code: Int) -> WMOCondition {
         table[code] ?? table[0]!
     }
     static func sfSymbol(for code: Int, isDay: Bool) -> String {
