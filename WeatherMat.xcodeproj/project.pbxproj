@@ -12,10 +12,8 @@
 		0A12613BA093A989EE7300B5 /* WeatherKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 932F42A0FC4EF8D453CF3F2C /* WeatherKit.framework */; };
 		1D63D26BB8AA66A3A17ABE36 /* WeatherMatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */; };
 		1E24A5AA3BA4B4B802E15309 /* EnsembleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B470F12426BB9567B938E302 /* EnsembleLogicTests.swift */; };
-		F6549FC20A1B80A8FF868781 /* ServiceDependencyInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */; };
-		27FF0F08EE7E2BD3E974F0A6 /* WeatherCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */; };
-		8FBF2EABAE857B19E7B8989A /* LiveActivityControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A975DB1B0C2FFA019E4507 /* LiveActivityControllerTests.swift */; };
 		206B856EAEFCFF82DA21494F /* WatchWeatherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FECA4B5C2E336F3BF03D7D85 /* WatchWeatherViewModel.swift */; };
+		27FF0F08EE7E2BD3E974F0A6 /* WeatherCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */; };
 		3454EA341C34508AFA6FC94D /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D816A840CA115017249F019 /* CoreLocation.framework */; };
 		3587BB562E549B4FDA0B575F /* WeatherMatWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1955EEFD6D61223911DCE83 /* WeatherMatWatchApp.swift */; };
 		38778D4610DFE9FDC59DF8EB /* WatchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17A3E69E0351E3234F9FBFE /* WatchModels.swift */; };
@@ -32,6 +30,7 @@
 		794E09EF06CCB328B348E1FB /* WatchLocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26100C5E68419642B7152789 /* WatchLocationProvider.swift */; };
 		8048F90F27026B76E2AFCFA5 /* LocationPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50981A1F9621DAF9B309313 /* LocationPickerView.swift */; };
 		8B7ED2C1E3B26845B9E79BE8 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D816A840CA115017249F019 /* CoreLocation.framework */; };
+		8FBF2EABAE857B19E7B8989A /* LiveActivityControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A975DB1B0C2FFA019E4507 /* LiveActivityControllerTests.swift */; };
 		9015F6C108E391F019F1B453 /* WeatherKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 932F42A0FC4EF8D453CF3F2C /* WeatherKit.framework */; };
 		97D2BF007AD657C3D9E8B4EE /* WatchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17A3E69E0351E3234F9FBFE /* WatchModels.swift */; };
 		A0EAF748BAB113E4F663BD47 /* WeatherMatWatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B77A6B458160A1EE9D33F965 /* WeatherMatWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -51,6 +50,7 @@
 		DD253565F3AA1B175DC0D663 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 119F2441DA73BFBF3A35E49F /* WidgetKit.framework */; };
 		E83ED223BE616432ECA3A40F /* WeatherMatWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 11483069810BC934246E7534 /* WeatherMatWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E9C445F096AEDD38B4A0E573 /* WeatherKitFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F3B82F80C5E22E2D0DC9E3 /* WeatherKitFetcher.swift */; };
+		F6549FC20A1B80A8FF868781 /* ServiceDependencyInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */; };
 		F7701A7FA01BD99A47795247 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 365D4B0310B7C38E6AE1F7FD /* SwiftUI.framework */; };
 		F84E21FB07A57C73C9A8E59E /* WatchSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13159EA7F63E20E5BAE2EDEC /* WatchSharedStore.swift */; };
 /* End PBXBuildFile section */
@@ -138,9 +138,8 @@
 		563CC27F61414492848C7E14 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
 		67C3AF23C29748D28368DE65 /* WeatherMatWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WeatherMatWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherMatTests.swift; sourceTree = "<group>"; };
-		7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceDependencyInjectionTests.swift; sourceTree = "<group>"; };
 		712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherCacheStoreTests.swift; sourceTree = "<group>"; };
-		C9A975DB1B0C2FFA019E4507 /* LiveActivityControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityControllerTests.swift; sourceTree = "<group>"; };
+		7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceDependencyInjectionTests.swift; sourceTree = "<group>"; };
 		7382D5D6B32A911786C1EB1C /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
 		745D35260B3A5713055E5C54 /* WeatherMatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WeatherMatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D816A840CA115017249F019 /* CoreLocation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreLocation.framework; path = System/Library/Frameworks/CoreLocation.framework; sourceTree = SDKROOT; };
@@ -156,6 +155,7 @@
 		B470F12426BB9567B938E302 /* EnsembleLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnsembleLogicTests.swift; sourceTree = "<group>"; };
 		B72624B834454D82389004F2 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 		B77A6B458160A1EE9D33F965 /* WeatherMatWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WeatherMatWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9A975DB1B0C2FFA019E4507 /* LiveActivityControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityControllerTests.swift; sourceTree = "<group>"; };
 		CECFD0FB4E01520B04E1828E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D17A3E69E0351E3234F9FBFE /* WatchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchModels.swift; sourceTree = "<group>"; };
 		D50981A1F9621DAF9B309313 /* LocationPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPickerView.swift; sourceTree = "<group>"; };
@@ -485,7 +485,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2700;
+				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					26DA9115F86D4CA570626EF2 = {
 						DevelopmentTeam = 5P532N3MK4;
@@ -840,7 +840,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = de.praxishartlep.weathermat.widgets;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -920,7 +920,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = de.praxishartlep.weathermat.widgets;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
