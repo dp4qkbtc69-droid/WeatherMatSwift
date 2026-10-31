@@ -216,3 +216,51 @@ struct RegionPackControllerDependencyInjectionTests {
         #expect(!controller.covers(windowStart: Fixtures.base.addingTimeInterval(-3600), windowEnd: Fixtures.base))
     }
 }
+
+// MARK: - RadarV2Store stale-data detection
+
+@MainActor
+struct RadarV2StoreStaleDataTests {
+
+    private func timeline(latestObservedMinutesAgo minutes: Double) -> RainRadarTimeline {
+        RainRadarTimeline(
+            host: "https://proxy.example",
+            attribution: "test",
+            source: .dwd,
+            tileMaxZoom: 9,
+            frames: [
+                RainRadarFrame(
+                    time: Date().addingTimeInterval(-minutes * 60),
+                    path: "/tiles/stale-test",
+                    isForecast: false,
+                    sourceKind: .dwdRadar,
+                    precipitationType: .unknown,
+                    referenceTime: nil
+                )
+            ]
+        )
+    }
+
+    @Test func dataIsStaleWhenLatestObservedFrameIsOlderThanThreshold() {
+        let store = RadarV2Store()
+        store.timeline = timeline(latestObservedMinutesAgo: 40)
+
+        #expect(store.isDataStale)
+        #expect(store.staleDataAgeLabel == "vor 40 Min.")
+    }
+
+    @Test func dataIsNotStaleWhenLatestObservedFrameIsRecent() {
+        let store = RadarV2Store()
+        store.timeline = timeline(latestObservedMinutesAgo: 5)
+
+        #expect(!store.isDataStale)
+        #expect(store.staleDataAgeLabel == nil)
+    }
+
+    @Test func dataIsNotStaleWithoutAnyTimelineLoaded() {
+        let store = RadarV2Store()
+
+        #expect(!store.isDataStale)
+        #expect(store.staleDataAgeLabel == nil)
+    }
+}

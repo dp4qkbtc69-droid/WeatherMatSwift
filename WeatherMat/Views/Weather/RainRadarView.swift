@@ -151,6 +151,7 @@ struct RainRadarScreen: View {
                         RadarLegendView(
                             attribution: store.timeline?.attribution,
                             isFallbackSource: store.timeline?.source == .rainViewer,
+                            staleDataAgeLabel: store.staleDataAgeLabel,
                             rainPalette: regionController.renderSet?.pack.palette.rain,
                             currentFrame: store.selectedFrame
                         ) {
@@ -209,7 +210,12 @@ struct RainRadarScreen: View {
             }
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .task { await store.load() }
+        .task {
+            await store.load()
+            if let ageLabel = store.staleDataAgeLabel {
+                showNotice("Radardaten \(ageLabel) (DWD-Quelle verzögert)")
+            }
+        }
         .task(id: location?.id) {
             loadRegionPackIfPossible()
         }

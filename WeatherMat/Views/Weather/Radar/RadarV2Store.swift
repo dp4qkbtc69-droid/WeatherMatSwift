@@ -39,6 +39,26 @@ final class RadarV2Store {
         return visibleFrames[min(selectedIndex, visibleFrames.count - 1)]
     }
 
+    // The proxy serves a stale-but-present cache without erroring whenever
+    // its background refresh fails (see RadarProxy's `_ensure_cache`) — so a
+    // broken upstream source doesn't surface as a loading/network error, it
+    // just quietly stops advancing. This is the client-side tripwire for
+    // that: compare the newest *observed* frame's age against "now" rather
+    // than trusting that a successful HTTP response means fresh data.
+    private static let staleDataThreshold: TimeInterval = 30 * 60
+
+    var isDataStale: Bool {
+        guard let latest = timeline?.latestObservedFrame else { return false }
+        return Date().timeIntervalSince(latest.time) > Self.staleDataThreshold
+    }
+
+    /// "vor 42 Min." — nil when the data isn't stale.
+    var staleDataAgeLabel: String? {
+        guard isDataStale, let latest = timeline?.latestObservedFrame else { return nil }
+        let minutes = max(1, Int(Date().timeIntervalSince(latest.time) / 60))
+        return "vor \(minutes) Min."
+    }
+
     var renderRequest: RadarV2RenderRequest? {
         guard let timeline, let selectedFrame else { return nil }
         return RadarV2RenderRequest(

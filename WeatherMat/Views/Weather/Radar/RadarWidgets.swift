@@ -39,6 +39,7 @@ struct RadarRoundButton: View {
 struct RadarLegendView: View {
     var attribution: String?
     var isFallbackSource = false
+    var staleDataAgeLabel: String?
     var rainPalette: [RadarPaletteStep]?
     var currentFrame: RainRadarFrame?
     let close: () -> Void
@@ -58,6 +59,17 @@ struct RadarLegendView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Legende schließen")
+            }
+
+            if let staleDataAgeLabel {
+                // The proxy can keep serving a stale-but-present cache
+                // without erroring when its upstream refresh fails — this is
+                // the one place that surfaces it persistently (the launch
+                // notice is a brief toast; this stays until the legend
+                // closes).
+                Text("Daten \(staleDataAgeLabel) – DWD-Quelle verzögert")
+                    .font(.system(.caption2, weight: .semibold))
+                    .foregroundStyle(AppColors.selection)
             }
 
             if isFallbackSource {
