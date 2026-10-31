@@ -29,7 +29,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct WeatherMatApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
-    @State private var vm = WeatherViewModel()
+    @State private var locationStore: LocationStore
+    @State private var vm: WeatherViewModel
     @AppStorage("appTheme") private var themeName: String = AppTheme.system.rawValue
 
     private var theme: AppTheme { AppTheme(rawValue: themeName) ?? .system }
@@ -40,11 +41,15 @@ struct WeatherMatApp: App {
             diskCapacity: 350 * 1024 * 1024,
             diskPath: "WeatherMatURLCache"
         )
+        let store = LocationStore()
+        _locationStore = State(wrappedValue: store)
+        _vm = State(wrappedValue: WeatherViewModel(locationStore: store))
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(locationStore)
                 .environment(vm)
                 .preferredColorScheme(theme.colorScheme)
                 .tint(Color(hex: "#0ea5e9"))
@@ -72,7 +77,7 @@ struct WeatherMatApp: App {
     // MARK: - Background refresh
     @Sendable
     private func performBackgroundRefresh() async {
-        guard let loc = vm.activeLocation else { return }
+        guard let loc = locationStore.activeLocation else { return }
         await vm.loadWeather(for: loc, force: true)
         scheduleBackgroundRefresh()
     }

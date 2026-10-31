@@ -7,24 +7,6 @@ private let rainRadarHomeRegion = MKCoordinateRegion(
     span: MKCoordinateSpan(latitudeDelta: 8.5, longitudeDelta: 11.0)
 )
 
-private struct RegionFrameRenderPlan: Sendable {
-    let frames: [RadarRegionPack.Frame]
-    let readinessFrameIDs: [String: String]
-}
-
-private let regionRenderWindowRadius = 8
-
-private struct RegionPackRequest {
-    let center: CLLocationCoordinate2D
-    let kilometers: Double
-
-    func isClose(to nextCenter: CLLocationCoordinate2D, kilometers nextKilometers: Double) -> Bool {
-        abs(center.latitude - nextCenter.latitude) < 0.08 &&
-        abs(center.longitude - nextCenter.longitude) < 0.08 &&
-        abs(kilometers - nextKilometers) < 20
-    }
-}
-
 struct RainRadarCardView: View {
     let location: SavedLocation?
     let rain: RainAnalysis
@@ -99,10 +81,11 @@ struct RainRadarScreen: View {
     @State private var mapRegion = rainRadarHomeRegion
     @State private var regionRevision = 0
     @State private var enabledLayers: Set<DwdWMSLayer> = [.lightningDensity]
-    @State private var regionRenderSet: RadarRegionRenderSet?
-    @State private var isRegionPackLoading = false
-    @State private var regionPackTask: Task<Void, Never>?
-    @State private var lastRequestedRegionPack: RegionPackRequest?
+    @State private var regionController = RegionPackController()
+    // Debounces rapid-fire selection changes (fast scrubbing) into a single
+    // render-window refresh; cancelled and restarted on every change, never
+    // left running idle, and cancelled outright in onDisappear.
+    @State private var regionWindowRefreshTask: Task<Void, Never>?
     @State private var showsLegend = false
     @State private var noticeText: String?
     // Chrome visibility state: header + rail hide after inactivity during
@@ -114,6 +97,9 @@ struct RainRadarScreen: View {
     /// tiles load first. The wider map fills in as the user zooms/pans out.
     private static let localSpanMeters: CLLocationDistance = 130_000
     private static let localRegionPackKilometers: Double = 300
+    /// How many frames around the current selection to keep rendered for the
+    /// region-pack overlay, each direction.
+    private static let regionRenderWindowRadius = 8
 
     init(location: SavedLocation?) {
         self.location = location
@@ -140,8 +126,8 @@ struct RainRadarScreen: View {
                 region: mapRegion,
                 regionRevision: regionRevision,
                 request: store.renderRequest,
-                regionRenderSet: regionRenderSet,
-                suppressesTilePrefetch: isRegionPackLoading,
+                regionRenderSet: regionController.renderSet,
+                suppressesTilePrefetch: regionController.isLoading,
                 enabledLayers: enabledLayers,
                 timelineFrame: store.selectedFrame,
                 isPlaying: store.isPlaying,
@@ -165,7 +151,7 @@ struct RainRadarScreen: View {
                         RadarLegendView(
                             attribution: store.timeline?.attribution,
                             isFallbackSource: store.timeline?.source == .rainViewer,
-                            rainPalette: regionRenderSet?.pack.palette.rain,
+                            rainPalette: regionController.renderSet?.pack.palette.rain,
                             currentFrame: store.selectedFrame
                         ) {
                             withRadarAnimation(.quick) {
@@ -225,11 +211,11 @@ struct RainRadarScreen: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .task { await store.load() }
         .task(id: location?.id) {
-            await loadRegionPackIfPossible()
+            loadRegionPackIfPossible()
         }
         .task(id: location?.id) {
             guard let location else { return }
-            _ = await RainRadarService.warmLocation(latitude: location.latitude, longitude: location.longitude)
+            _ = await RainRadarService.shared.warmLocation(latitude: location.latitude, longitude: location.longitude)
         }
         .task(id: store.isPlaying) {
             guard store.isPlaying else { return }
@@ -237,7 +223,7 @@ struct RainRadarScreen: View {
                 try? await Task.sleep(nanoseconds: store.nextPlaybackDelayNanoseconds)
                 guard !Task.isCancelled else { return }
                 if let nextFrame = store.nextPlaybackFrame,
-                   regionRenderSet?.image(for: nextFrame) == nil {
+                   regionController.renderSet?.image(for: nextFrame) == nil {
                     // Motion spec: hold/stall on unready frames rather than
                     // jumping to empty tiles. First a quiet wait, then a
                     // visible buffering hold, then advance regardless so a
@@ -269,101 +255,32 @@ struct RainRadarScreen: View {
             // Legend keeps chrome visible while open.
             if open { showChrome() }
         }
+        // Selection changed (scrub, playback advance, or the timeline just
+        // finished loading) — debounced so a fast scrub coalesces into one
+        // refresh instead of cancel/restart on every intermediate frame.
+        .onChange(of: store.selectedFrame) { _, _ in
+            scheduleRegionWindowRefresh()
+        }
+        // A pack just finished loading (initial fetch or a pan-triggered
+        // refetch) — render its first window immediately, no debounce.
+        .onChange(of: regionController.pack) { _, _ in
+            refreshRegionRenderWindow()
+        }
         .onDisappear {
             chromeHideTask?.cancel()
-            regionPackTask?.cancel()
+            regionWindowRefreshTask?.cancel()
+            regionController.cancelAll()
         }
         .statusBarHidden(false)
     }
 
-    @MainActor
-    private func loadRegionPackIfPossible() async {
+    private func loadRegionPackIfPossible() {
         let center = userCoordinate ?? mapRegion.center
-        await loadRegionPack(center: center, kilometers: Self.localRegionPackKilometers, keepsExistingOverlay: false)
-    }
-
-    @MainActor
-    private func loadRegionPack(center: CLLocationCoordinate2D, kilometers: Double, keepsExistingOverlay: Bool) async {
-        regionPackTask?.cancel()
-        if !keepsExistingOverlay {
-            regionRenderSet = nil
-        }
-        let latitude = center.latitude
-        let longitude = center.longitude
-        let kilometers = min(400, max(40, kilometers))
-        lastRequestedRegionPack = RegionPackRequest(center: center, kilometers: kilometers)
-        isRegionPackLoading = true
-        regionPackTask = Task {
-            do {
-                let pack = try await RegionPackService.fetchRegionPack(
-                    latitude: latitude,
-                    longitude: longitude,
-                    km: kilometers
-                )
-                for _ in 0..<20 {
-                    let hasSelectedFrame = await MainActor.run { store.selectedFrame != nil }
-                    if hasSelectedFrame { break }
-                    try? await Task.sleep(nanoseconds: 50_000_000)
-                }
-                var images: [String: CGImage] = [:]
-                images.reserveCapacity(regionRenderWindowRadius * 2 + 1)
-                var publishedFirstFrame = false
-                while !Task.isCancelled {
-                    let plan = await MainActor.run {
-                        regionRenderPlan(for: pack)
-                    }
-                    let wantedFrameIDs = Set(plan.frames.map(\.id))
-                    let previousCount = images.count
-                    images = images.filter { wantedFrameIDs.contains($0.key) }
-                    if images.count != previousCount {
-                        let nextSet = RadarRegionRenderSet(pack: pack, images: images)
-                        await MainActor.run {
-                            regionRenderSet = nextSet
-                        }
-                    }
-
-                    var renderedMissingFrame = false
-                    for frame in plan.frames where images[frame.id] == nil {
-                        guard !Task.isCancelled else { return }
-                        guard let rendered = await RadarRegionImageRenderer.renderFrame(frame, pack: pack) else { continue }
-                        renderedMissingFrame = true
-                        images[rendered.frameID] = rendered.image
-                        let nextSet = RadarRegionRenderSet(pack: pack, images: images)
-                        let readinessFrameID = plan.readinessFrameIDs[rendered.frameID]
-                        await MainActor.run {
-                            regionRenderSet = nextSet
-                            if !publishedFirstFrame {
-                                isRegionPackLoading = false
-                            }
-                            store.isBuffering = false
-                        }
-                        publishedFirstFrame = true
-                        if let readinessFrameID {
-                            await RadarTileReadinessCenter.shared.markReady(readinessFrameID)
-                        }
-                    }
-                    guard !Task.isCancelled else { return }
-                    if !renderedMissingFrame {
-                        await MainActor.run {
-                            if !publishedFirstFrame {
-                                isRegionPackLoading = false
-                            }
-                        }
-                        publishedFirstFrame = true
-                        try? await Task.sleep(nanoseconds: 220_000_000)
-                    }
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    if !keepsExistingOverlay {
-                        regionRenderSet = nil
-                    }
-                    isRegionPackLoading = false
-                    lastRequestedRegionPack = nil
-                }
-            }
-        }
+        let window = desiredTimeWindow()
+        regionController.load(
+            center: center, kilometers: Self.localRegionPackKilometers, keepsExistingOverlay: false,
+            startTime: window?.start, endTime: window?.end
+        )
     }
 
     @MainActor
@@ -371,20 +288,33 @@ struct RainRadarScreen: View {
         guard store.timeline?.source == .dwd else { return }
         guard visibleMapRect.width > 0, visibleMapRect.height > 0 else { return }
         let desiredKilometers = desiredRegionPackKilometers(center: center, visibleMapRect: visibleMapRect)
-        if isRegionPackLoading,
-           let lastRequestedRegionPack,
-           lastRequestedRegionPack.isClose(to: center, kilometers: desiredKilometers) {
+        if regionController.isLoading,
+           let lastRequest = regionController.lastRequest,
+           lastRequest.isClose(to: center, kilometers: desiredKilometers) {
             return
         }
-        if let regionRenderSet,
-           regionRenderSet.pack.mapRect.regionContains(visibleMapRect),
-           visibleMapRect.width >= regionRenderSet.pack.mapRect.width / 8.0,
-           lastRequestedRegionPack?.isClose(to: center, kilometers: desiredKilometers) != false {
+        if let renderSet = regionController.renderSet,
+           renderSet.pack.mapRect.regionContains(visibleMapRect),
+           visibleMapRect.width >= renderSet.pack.mapRect.width / 8.0,
+           regionController.lastRequest?.isClose(to: center, kilometers: desiredKilometers) != false {
             return
         }
-        Task { @MainActor in
-            await loadRegionPack(center: center, kilometers: desiredKilometers, keepsExistingOverlay: true)
-        }
+        let window = desiredTimeWindow()
+        regionController.load(
+            center: center, kilometers: desiredKilometers, keepsExistingOverlay: true,
+            startTime: window?.start, endTime: window?.end
+        )
+    }
+
+    /// The time span the region-pack needs to cover right now: the span of
+    /// `store.regionRenderWindow`, i.e. exactly the frames the renderer is
+    /// about to need — not the whole timeline. `nil` (no selection yet, e.g.
+    /// the very first load before the timeline has finished loading) lets
+    /// the server fall back to its own default window around "now".
+    private func desiredTimeWindow() -> (start: Date, end: Date)? {
+        let times = store.regionRenderWindow(radius: Self.regionRenderWindowRadius).map(\.time)
+        guard let start = times.min(), let end = times.max() else { return nil }
+        return (start, end)
     }
 
     private func desiredRegionPackKilometers(center: CLLocationCoordinate2D, visibleMapRect: MKMapRect) -> Double {
@@ -400,48 +330,47 @@ struct RainRadarScreen: View {
         return mercatorMeters * max(0.15, cos(latitude * .pi / 180.0)) / 1_000.0
     }
 
+    /// Debounces rapid selection changes (fast scrubbing) into a single
+    /// refresh ~90 ms after they stop — short enough to feel immediate for
+    /// playback (steps are 300 ms+ apart) and for a deliberate scrub, long
+    /// enough that a fast drag doesn't cancel/restart a render every tick.
+    /// A single sleep-then-check, not a repeating loop: it runs once and
+    /// stops, doing nothing at all once the selection is quiet.
+    private func scheduleRegionWindowRefresh() {
+        regionWindowRefreshTask?.cancel()
+        regionWindowRefreshTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 90_000_000)
+            guard !Task.isCancelled else { return }
+            refreshRegionRenderWindow()
+        }
+    }
+
     @MainActor
-    private func regionRenderPlan(for pack: RadarRegionPack) -> RegionFrameRenderPlan {
-        let packFramesByID = Dictionary(uniqueKeysWithValues: pack.frames.map { ($0.id, $0) })
-        var readinessFrameIDs: [String: String] = [:]
-        for frame in store.visibleFrames {
-            readinessFrameIDs[RegionPackService.regionFrameID(from: frame)] = frame.id
+    private func refreshRegionRenderWindow() {
+        // The loaded pack only covers a time window now (not the whole
+        // timeline) — if the selection scrubbed past its edge, the pack
+        // itself needs reloading around the new window before there's
+        // anything to render.
+        if let window = desiredTimeWindow(), !regionController.covers(windowStart: window.start, windowEnd: window.end) {
+            reloadRegionPackForCurrentSelection()
+            return
         }
-        var orderedIDs: [String] = []
-        var seen = Set<String>()
+        let regionFrameIDs = store.regionRenderWindow(radius: Self.regionRenderWindowRadius)
+            .map(RegionPackService.regionFrameID(from:))
+        regionController.ensureRendered(
+            orderedRegionFrameIDs: regionFrameIDs,
+            readinessFrameIDs: store.regionFrameIDToTimelineFrameID
+        )
+    }
 
-        func append(_ frame: RainRadarFrame) {
-            let id = RegionPackService.regionFrameID(from: frame)
-            guard packFramesByID[id] != nil, seen.insert(id).inserted else { return }
-            orderedIDs.append(id)
-        }
-
-        let visible = store.visibleFrames
-        if let selectedFrame = store.selectedFrame {
-            append(selectedFrame)
-        }
-        if !visible.isEmpty {
-            let start = min(store.selectedIndex, visible.count - 1)
-            for offset in 1...regionRenderWindowRadius {
-                let forwardIndex = start + offset
-                if forwardIndex < visible.count {
-                    append(visible[forwardIndex])
-                }
-                let backwardIndex = start - offset
-                if backwardIndex >= 0 {
-                    append(visible[backwardIndex])
-                }
-            }
-        }
-        if orderedIDs.isEmpty {
-            for frame in pack.frames.prefix(regionRenderWindowRadius * 2 + 1) where seen.insert(frame.id).inserted {
-                orderedIDs.append(frame.id)
-            }
-        }
-
-        return RegionFrameRenderPlan(
-            frames: orderedIDs.compactMap { packFramesByID[$0] },
-            readinessFrameIDs: readinessFrameIDs
+    @MainActor
+    private func reloadRegionPackForCurrentSelection() {
+        let center = regionController.lastRequest?.center ?? userCoordinate ?? mapRegion.center
+        let kilometers = regionController.lastRequest?.kilometers ?? Self.localRegionPackKilometers
+        let window = desiredTimeWindow()
+        regionController.load(
+            center: center, kilometers: kilometers, keepsExistingOverlay: true,
+            startTime: window?.start, endTime: window?.end
         )
     }
 

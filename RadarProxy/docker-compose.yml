@@ -14,8 +14,14 @@ services:
       DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS: "${DWD_RADAR_DISK_CACHE_MAX_AGE_SECONDS:-86400}"
       DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS: "${DWD_RADAR_DISK_CACHE_PRUNE_INTERVAL_SECONDS:-3600}"
       DWD_WMS_LAYER: "${DWD_WMS_LAYER:-Radar_rv_product_1x1km_ger}"
-      DWD_RADAR_TILE_MAX_ZOOM: "${DWD_RADAR_TILE_MAX_ZOOM:-13}"
+      DWD_RADAR_TILE_MAX_ZOOM: "${DWD_RADAR_TILE_MAX_ZOOM:-14}"
       RADAR_TILE_RENDER_SCALE: "${RADAR_TILE_RENDER_SCALE:-2}"
+      # 2x supersampling only helps where a tile is downsampling many native
+      # ~1.2 km grid cells into 512px; past this zoom it's upscaling a
+      # handful of cells instead, so those tiles render at scale 1 — keeps
+      # the newly-deeper zoom range (and the existing z7+ detail view) cheap
+      # to render on demand and cheap to hold in the 12000-tile memory cache.
+      DWD_RADAR_TILE_RENDER_SCALE_MAX_ZOOM: "${DWD_RADAR_TILE_RENDER_SCALE_MAX_ZOOM:-7}"
       DWD_RADAR_PAST_HOURS: "${DWD_RADAR_PAST_HOURS:-24}"
       DWD_RADAR_PAST_STEP_MINUTES: "${DWD_RADAR_PAST_STEP_MINUTES:-15}"
       DWD_RADAR_CACHE_SECONDS: "${DWD_RADAR_CACHE_SECONDS:-240}"
@@ -43,6 +49,15 @@ services:
       DWD_RADAR_HOTSPOT_DETAIL_ZOOMS: "${DWD_RADAR_HOTSPOT_DETAIL_ZOOMS:-7,8,9}"
       DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT: "${DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT:-96}"
       DWD_RADAR_HOTSPOT_DETAIL_HALF_KM: "${DWD_RADAR_HOTSPOT_DETAIL_HALF_KM:-75}"
+      # Deep zoom (10-14): only the single most-recently-active location
+      # (set by the app's /warm-location call on every switch/open), a tight
+      # radius, and fewer frames — tile count roughly quadruples per zoom
+      # level, so warming this deep for every saved hotspot would overload
+      # the Beelink's 2 cores. Every other location/pan still falls back to
+      # on-demand rendering, same as before this existed.
+      DWD_RADAR_HOTSPOT_DEEP_ZOOMS: "${DWD_RADAR_HOTSPOT_DEEP_ZOOMS:-10,11,12,13,14}"
+      DWD_RADAR_HOTSPOT_DEEP_HALF_KM: "${DWD_RADAR_HOTSPOT_DEEP_HALF_KM:-8.0}"
+      DWD_RADAR_HOTSPOT_DEEP_FRAME_LIMIT: "${DWD_RADAR_HOTSPOT_DEEP_FRAME_LIMIT:-24}"
       # How many user locations to keep warm (app registers all its saved ones).
       DWD_RADAR_DYNAMIC_HOTSPOTS_MAX: "${DWD_RADAR_DYNAMIC_HOTSPOTS_MAX:-16}"
       # Optics: continuous colour ramp instead of hard bands + edge feathering.

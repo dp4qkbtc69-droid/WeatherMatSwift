@@ -41,6 +41,8 @@
 	<string>WeatherMat benötigt deinen Standort für lokale Wetterdaten.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>WeatherMat benötigt deinen Standort für lokale Wetterdaten.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

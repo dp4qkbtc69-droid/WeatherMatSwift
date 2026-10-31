@@ -47,6 +47,27 @@ struct WeatherMatSwiftTesting {
         #expect(decoded.subtitle == "Berlin, DE")
     }
 
+    @Test("WeatherCacheStore save/load/remove round trip")
+    func weatherCacheStoreRoundTrip() throws {
+        // Random UUID — never touches the real "savedLocations_v1"/saved-
+        // location cache keys, so this can't clobber the user's actual data
+        // even though tests run in-process with the host app.
+        let id = UUID()
+        defer { WeatherCacheStore.remove(for: id) }
+
+        #expect(WeatherCacheStore.load(for: id) == nil)
+
+        let fetchedAt = Date()
+        WeatherCacheStore.save(.empty, fetchedAt: fetchedAt, for: id)
+
+        let loaded = try #require(WeatherCacheStore.load(for: id))
+        #expect(abs(loaded.fetchedAt.timeIntervalSince(fetchedAt)) < 1)
+        #expect(loaded.data.activeModels.isEmpty)
+
+        WeatherCacheStore.remove(for: id)
+        #expect(WeatherCacheStore.load(for: id) == nil)
+    }
+
     @Test("WMO code produces distinct day and night symbols")
     func wmoCodeProducesDistinctDayAndNightSymbols() {
         let condition = WMOCode.condition(for: 0)

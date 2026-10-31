@@ -33,15 +33,15 @@ final class PushRegistrationService {
     /// Sends token + all saved locations to the proxy. Safe to call often —
     /// no-ops without token or proxy config, failures are retried on next call.
     func syncRegistration() async {
-        guard let token = deviceToken,
-              let baseURL = RainRadarService.proxyBaseURL else { return }
+        guard let token = deviceToken else { return }
+        guard let baseURL = await RainRadarService.shared.resolvedProxyBaseURL() else { return }
 
         let locations = Self.loadSavedLocations().prefix(12).map { loc in
             PushLocationPayload(lat: loc.latitude, lon: loc.longitude, name: loc.name)
         }
         guard !locations.isEmpty else { return }
 
-        var request = RainRadarService.authenticatedDwdRadarRequest(baseURL.appending(path: "push/register"))
+        var request = RainRadarService.shared.authenticatedDwdRadarRequest(baseURL.appending(path: "push/register"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10

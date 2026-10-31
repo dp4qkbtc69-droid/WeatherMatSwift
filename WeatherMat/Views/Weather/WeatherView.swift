@@ -3,6 +3,7 @@ import SwiftUI
 
 struct WeatherView: View {
     @Environment(WeatherViewModel.self) private var vm
+    @Environment(LocationStore.self) private var locationStore
     @Binding var showLocations: Bool
     /// Non-nil when shown as the detail pane of an iPad sidebar layout —
     /// the swipe-between-locations gesture is switched off (the sidebar
@@ -40,7 +41,7 @@ struct WeatherView: View {
             guard vm.weatherData != nil else { return }
             // Preload radar timeline in background so radar opens instantly
             Task.detached(priority: .background) {
-                await RainRadarService.preloadIfNeeded()
+                await RainRadarService.shared.preloadIfNeeded()
             }
         }
     }
@@ -126,7 +127,7 @@ struct WeatherView: View {
             await vm.refresh()
         }
         .fullScreenCover(isPresented: $showRainRadar) {
-            RainRadarScreen(location: vm.activeLocation)
+            RainRadarScreen(location: locationStore.activeLocation)
         }
     }
 

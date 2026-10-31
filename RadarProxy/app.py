@@ -84,7 +84,7 @@ WARM_WORKERS = max(1, int(os.environ.get("DWD_RADAR_WARM_WORKERS", str(os.cpu_co
 WARM_DETAIL_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_WARM_DETAIL_FRAME_LIMIT", "6"))
 WARM_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_WARM_ZOOMS", "5,6").split(",") if item.strip())
 WARM_DETAIL_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_WARM_DETAIL_ZOOMS", "7").split(",") if item.strip())
-TILE_MAX_ZOOM = int(os.environ.get("DWD_RADAR_TILE_MAX_ZOOM", "13"))
+TILE_MAX_ZOOM = int(os.environ.get("DWD_RADAR_TILE_MAX_ZOOM", "14"))
 HOTSPOT_WARM = os.environ.get("DWD_RADAR_HOTSPOT_WARM", "true").lower() in {"1", "true", "yes"}
 HOTSPOT_LAT = float(os.environ.get("DWD_RADAR_HOTSPOT_LAT", "50.088"))
 HOTSPOT_LON = float(os.environ.get("DWD_RADAR_HOTSPOT_LON", "9.064"))
@@ -96,6 +96,18 @@ HOTSPOT_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_ZO
 HOTSPOT_DETAIL_ZOOMS = tuple(int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_ZOOMS", "7,8,9").split(",") if item.strip())
 HOTSPOT_DETAIL_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_FRAME_LIMIT", "96"))
 HOTSPOT_DETAIL_HALF_KM = float(os.environ.get("DWD_RADAR_HOTSPOT_DETAIL_HALF_KM", "75"))
+# Deep zoom (10+) pre-warming is scoped to only the single most-recently
+# active location — set via /warm-location, which the app already calls
+# whenever the user opens/switches to a location — and to a small radius
+# around it, never to every saved hotspot or the general warm bbox. Tile
+# count roughly quadruples per zoom level, so warming all ~16 possible saved
+# locations this deep would overload the Beelink's 2 cores for no benefit:
+# the user is only ever looking at one location's deep-zoom view at a time.
+HOTSPOT_DEEP_ZOOMS = tuple(
+    int(item) for item in os.environ.get("DWD_RADAR_HOTSPOT_DEEP_ZOOMS", "10,11,12,13,14").split(",") if item.strip()
+)
+HOTSPOT_DEEP_HALF_KM = float(os.environ.get("DWD_RADAR_HOTSPOT_DEEP_HALF_KM", "8.0"))
+HOTSPOT_DEEP_FRAME_LIMIT = int(os.environ.get("DWD_RADAR_HOTSPOT_DEEP_FRAME_LIMIT", "24"))
 # How many user locations to keep warm. The app registers all its saved
 # locations, so this caps how many open the radar instantly.
 DYNAMIC_HOTSPOTS_MAX = int(os.environ.get("DWD_RADAR_DYNAMIC_HOTSPOTS_MAX", "16"))
@@ -106,8 +118,26 @@ try:
     TILE_RENDER_SCALE = max(1, min(4, int(os.environ.get("RADAR_TILE_RENDER_SCALE", "2"))))
 except ValueError:
     TILE_RENDER_SCALE = 2
+# Supersampling (rendering at TILE_SIZE * TILE_RENDER_SCALE, then downscaling)
+# only pays off where it's smoothing *many* native grid cells into one output
+# pixel. Past this zoom, a tile covers so little ground that we're upscaling
+# a handful of native cells to 512px instead — supersampling there adds
+# nothing visible but still costs ~4x the resize/encode work per tile (worse
+# at the deep zooms this zoom-range extension specifically adds), so tiles
+# past this zoom render at scale 1. Native DE1200 cells are ~1.2 km wide,
+# which a 512px tile matches at native resolution around z6 (km/px crosses
+# the ~1.2 km native cell size there), so z7+ is already past the point
+# supersampling helps — this just makes the cutover explicit and tunable
+# instead of leaving it as an unexamined fixed cost at every zoom.
+TILE_RENDER_SCALE_MAX_ZOOM = int(os.environ.get("DWD_RADAR_TILE_RENDER_SCALE_MAX_ZOOM", "7"))
 GRID_WIDTH = 1100
 GRID_HEIGHT = 1200
+# Default /region-pack time window when the client doesn't pass start_time/
+# end_time: just enough around "now" for the client's render window (a
+# selection ± a handful of frames) instead of the whole timeline (up to
+# 120 h of forecast). Overridable for clients that need a wider look-ahead.
+REGION_PACK_DEFAULT_PAST_HOURS = float(os.environ.get("DWD_RADAR_REGION_PACK_PAST_HOURS", "2.0"))
+REGION_PACK_DEFAULT_FUTURE_HOURS = float(os.environ.get("DWD_RADAR_REGION_PACK_FUTURE_HOURS", "1.0"))
 APP_VERSION = "rainbow-palette-2026-07-05"
 
 # Conventional radar rainbow: cyan (very light) -> green -> yellow -> orange
@@ -216,7 +246,10 @@ class RadarCache:
     frames: List[RadarFrame]
     tile_cache: Dict[Tuple[str, int, int, int], bytes]
     tile_cache_lock: threading.Lock = field(default_factory=threading.Lock)
-    region_pack_cache: Dict[Tuple[float, float, float, int, float], bytes] = field(default_factory=dict)
+    # Key adds the requested time window (as epoch seconds, or None for
+    # "all frames") so differently-windowed requests for the same region
+    # don't collide in the cache.
+    region_pack_cache: Dict[Tuple[Any, ...], bytes] = field(default_factory=dict)
     region_pack_cache_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -240,6 +273,14 @@ _warm_stats = {
 _dynamic_hotspots: List[Tuple[float, float]] = []
 _dynamic_hotspots_lock = threading.Lock()
 _dynamic_hotspots_loaded = False
+# The one location the client most recently marked active via /warm-location
+# (which the app calls on every location switch/foreground, see
+# RadarPrewarmController.prewarmIfNeeded — ≤15 min cooldown). Deep-zoom warm
+# targets only this point. In-memory only, unlike _dynamic_hotspots: it's a
+# live "what's on screen right now" signal, not a saved-location list, so
+# it's naturally fresh again shortly after any restart — not worth persisting.
+_active_hotspot: Tuple[float, float] | None = None
+_active_hotspot_lock = threading.Lock()
 _icon_raw_cache_lock = threading.Lock()
 _icon_raw_cache: Dict[str, Any] = {
     "referenceTime": None,
@@ -372,30 +413,78 @@ def tile(
     return Response(content=data, media_type="image/png", headers={"Cache-Control": "public, max-age=600"})
 
 
+def _parse_region_pack_datetime(value: str, *, param_name: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=f"Invalid {param_name}") from error
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _resolve_region_pack_window(
+    frames: str, start_time: Optional[str], end_time: Optional[str]
+) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """Resolves the time window to pack. `frames=all` (legacy/debug escape
+    hatch) skips windowing entirely. Otherwise explicit start_time/end_time
+    win; anything left unset falls back to a sliding window around now."""
+    if frames == "all":
+        return None, None
+    now = datetime.now(timezone.utc)
+    start = (
+        _parse_region_pack_datetime(start_time, param_name="start_time")
+        if start_time
+        else now - timedelta(hours=REGION_PACK_DEFAULT_PAST_HOURS)
+    )
+    end = (
+        _parse_region_pack_datetime(end_time, param_name="end_time")
+        if end_time
+        else now + timedelta(hours=REGION_PACK_DEFAULT_FUTURE_HOURS)
+    )
+    if start > end:
+        raise HTTPException(status_code=400, detail="start_time must be before end_time")
+    return start, end
+
+
 @app.get("/region-pack")
-def region_pack(request: Request, lat: float, lon: float, km: float = 130.0, frames: str = "all") -> Response:
+def region_pack(
+    request: Request,
+    lat: float,
+    lon: float,
+    km: float = 130.0,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    frames: str = "window",
+) -> Response:
     _require_token(request)
     if not (-85.0 <= lat <= 85.0 and -180.0 <= lon <= 180.0):
         raise HTTPException(status_code=400, detail="Invalid coordinate")
     if not (20.0 <= km <= 800.0):
         raise HTTPException(status_code=400, detail="Invalid region size")
-    if frames != "all":
-        raise HTTPException(status_code=400, detail="Only frames=all is supported")
+    if frames not in ("window", "all"):
+        raise HTTPException(status_code=400, detail="frames must be 'window' or 'all'")
     try:
         cache = _ensure_cache()
     except Exception as error:
         raise HTTPException(status_code=503, detail=f"Radar cache build failed: {error}") from error
+
+    window_start, window_end = _resolve_region_pack_window(frames, start_time, end_time)
 
     rounded_lat = round(lat, 3)
     rounded_lon = round(lon, 3)
     rounded_km = round(km, 1)
     grid_size = int(os.environ.get("DWD_RADAR_REGION_GRID_SIZE", "384"))
     grid_size = max(96, min(512, grid_size))
-    key = (rounded_lat, rounded_lon, rounded_km, grid_size, cache.loaded_at)
+    window_key = (
+        window_start.timestamp() if window_start else None,
+        window_end.timestamp() if window_end else None,
+    )
+    key = (rounded_lat, rounded_lon, rounded_km, grid_size, window_key, cache.loaded_at)
     with cache.region_pack_cache_lock:
         cached = cache.region_pack_cache.get(key)
     if cached is None:
-        cached = _build_region_pack(cache, rounded_lat, rounded_lon, rounded_km, grid_size)
+        cached = _build_region_pack(cache, rounded_lat, rounded_lon, rounded_km, grid_size, window_start, window_end)
         with cache.region_pack_cache_lock:
             while len(cache.region_pack_cache) > 24:
                 cache.region_pack_cache.pop(next(iter(cache.region_pack_cache)))
@@ -490,18 +579,22 @@ def warm_location(request: Request, lat: float, lon: float) -> dict:
     _require_token(request)
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
         raise HTTPException(status_code=400, detail="Invalid coordinate")
+    point = (round(lat, 4), round(lon, 4))
     with _dynamic_hotspots_lock:
-        point = (round(lat, 4), round(lon, 4))
         _dynamic_hotspots[:] = [item for item in _dynamic_hotspots if item != point]
         _dynamic_hotspots.insert(0, point)
         del _dynamic_hotspots[DYNAMIC_HOTSPOTS_MAX:]
     _save_dynamic_hotspots()
+    global _active_hotspot
+    with _active_hotspot_lock:
+        _active_hotspot = point
     cache = _ensure_cache()
     scheduled = _schedule_tile_warm(cache, force=True)
     return {
         "ok": True,
         "scheduled": scheduled,
         "hotspots": _dynamic_hotspots_snapshot(),
+        "activeHotspot": {"lat": point[0], "lon": point[1]},
         "warmStats": _warm_stats,
     }
 
@@ -519,6 +612,7 @@ def metrics(request: Request) -> dict:
         "warmStats": _warm_stats,
         "metrics": _metrics_snapshot(),
         "hotspots": _dynamic_hotspots_snapshot(),
+        "activeHotspot": _active_hotspot_snapshot(),
     }
 
 # --- Warning push: registration + APNs delivery ---
@@ -874,6 +968,12 @@ def _dynamic_hotspots_snapshot() -> List[Dict[str, float]]:
         return [{"lat": lat, "lon": lon} for lat, lon in _dynamic_hotspots]
 
 
+def _active_hotspot_snapshot() -> Dict[str, float] | None:
+    with _active_hotspot_lock:
+        point = _active_hotspot
+    return {"lat": point[0], "lon": point[1]} if point else None
+
+
 def _icon_raw_decoder_available() -> bool:
     try:
         import eccodes  # type: ignore  # noqa: F401
@@ -984,8 +1084,23 @@ def _tile_bytes(cache: RadarCache, frame: RadarFrame, z: int, x: int, y: int) ->
     return data, False
 
 
-def _build_region_pack(cache: RadarCache, lat: float, lon: float, km: float, grid_size: int) -> bytes:
+def _build_region_pack(
+    cache: RadarCache,
+    lat: float,
+    lon: float,
+    km: float,
+    grid_size: int,
+    window_start: Optional[datetime] = None,
+    window_end: Optional[datetime] = None,
+) -> bytes:
     usable_frames = [frame for frame in cache.frames if frame.rain is not None]
+    if window_start is not None or window_end is not None:
+        usable_frames = [
+            frame
+            for frame in usable_frames
+            if (window_start is None or frame.time >= window_start)
+            and (window_end is None or frame.time <= window_end)
+        ]
     if not usable_frames:
         raise HTTPException(status_code=404, detail="No raw radar frames available for region pack")
 
@@ -1250,6 +1365,8 @@ def _warm_tiles_background(cache: RadarCache, cache_id: float) -> None:
     }
 
     hotspot_points = _all_hotspot_points()
+    with _active_hotspot_lock:
+        active_point = _active_hotspot
     try:
         # Build the full tile worklist first, then render across WARM_WORKERS
         # threads so both vCPUs are used instead of one.
@@ -1275,6 +1392,18 @@ def _warm_tiles_background(cache: RadarCache, cache_id: float) -> None:
                                 continue
                             seen.add((z, x, y))
                             tasks.append((frame, z, x, y))
+            # Deep zoom (10+): the single active location only, a small
+            # radius, and fewer frames — see HOTSPOT_DEEP_* comment at their
+            # definition for why this stays off the general hotspot list.
+            # Everywhere/everyone else keeps rendering these zooms on demand.
+            if HOTSPOT_WARM and HOTSPOT_DEEP_ZOOMS and active_point is not None and frame_index < HOTSPOT_DEEP_FRAME_LIMIT:
+                lat, lon = active_point
+                for z in HOTSPOT_DEEP_ZOOMS:
+                    for x, y in _hotspot_view_tile_paths(z, lat, lon, HOTSPOT_DEEP_HALF_KM):
+                        if (z, x, y) in seen:
+                            continue
+                        seen.add((z, x, y))
+                        tasks.append((frame, z, x, y))
             warmed_frames += 1
 
         def _warm_one(task: Tuple[RadarFrame, int, int, int]) -> bool:
@@ -2087,6 +2216,14 @@ def _paint_range(rgba: np.ndarray, intensity: np.ndarray, lower: float, upper: f
     rgba[mask] = color
 
 
+def _tile_render_scale(z: int) -> int:
+    """Supersampling factor for a tile at zoom `z` — `TILE_RENDER_SCALE` up to
+    `TILE_RENDER_SCALE_MAX_ZOOM`, then 1 (see the comment at
+    `TILE_RENDER_SCALE_MAX_ZOOM`'s definition for why deep zooms don't
+    benefit from it)."""
+    return TILE_RENDER_SCALE if z <= TILE_RENDER_SCALE_MAX_ZOOM else 1
+
+
 def _render_tile(image: Image.Image, z: int, x: int, y: int) -> bytes:
     tile_bounds = _tile_lon_lat_bounds(z, x, y)
     intersection = _intersection(tile_bounds, RADAR_BBOX)
@@ -2106,7 +2243,7 @@ def _render_tile(image: Image.Image, z: int, x: int, y: int) -> bytes:
         int(round((tile_north - south) / (tile_north - tile_south) * TILE_SIZE)),
     )
 
-    scale = TILE_RENDER_SCALE
+    scale = _tile_render_scale(z)
     output_size = TILE_SIZE * scale
     out = Image.new("RGBA", (output_size, output_size), (0, 0, 0, 0))
     scaled_target = tuple(value * scale for value in target)

@@ -10,6 +10,8 @@
 	<string></string>
 	<key>dwdRadarTileBaseURL</key>
 	<string></string>
+	<key>dwdRadarTileExternalBaseURL</key>
+	<string></string>
 	<key>dwdRadarTileToken</key>
 	<string></string>
 </dict>

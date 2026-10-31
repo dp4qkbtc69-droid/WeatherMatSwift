@@ -4,6 +4,7 @@ import UserNotifications
 
 struct LocationsView: View {
     @Environment(WeatherViewModel.self) private var vm
+    @Environment(LocationStore.self) private var locationStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     /// Called by the close button instead of the default `dismiss()` when
@@ -105,7 +106,7 @@ struct LocationsView: View {
             Spacer(minLength: 8)
 
             HStack(spacing: 0) {
-                if vm.savedLocations.count > 1 {
+                if locationStore.savedLocations.count > 1 {
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isReordering.toggle()
@@ -154,11 +155,11 @@ struct LocationsView: View {
 
     private var reorderList: some View {
         List {
-            ForEach(vm.savedLocations) { loc in
+            ForEach(locationStore.savedLocations) { loc in
                 HStack(spacing: 12) {
                     Image(systemName: loc.isGPS ? "location.fill" : "mappin.circle.fill")
                         .font(.system(.headline, weight: .semibold))
-                        .foregroundStyle(loc.id == vm.activeLocation?.id ? .cyan : .white.opacity(0.58))
+                        .foregroundStyle(loc.id == locationStore.activeLocation?.id ? .cyan : .white.opacity(0.58))
                         .frame(width: 28)
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -177,7 +178,7 @@ struct LocationsView: View {
                 .moveDisabled(loc.isGPS)
             }
             .onMove { source, destination in
-                vm.moveLocations(from: source, to: destination)
+                locationStore.moveLocations(from: source, to: destination)
             }
         }
         .environment(\.editMode, .constant(.active))
@@ -190,12 +191,12 @@ struct LocationsView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 16) {
                 // Saved locations
-                if vm.savedLocations.isEmpty {
+                if locationStore.savedLocations.isEmpty {
                     emptyState
                 } else {
                     VStack(spacing: 10) {
-                        ForEach(Array(vm.savedLocations.enumerated()), id: \.element.id) { i, loc in
-                            LocationCardView(loc: loc, isActive: i == vm.activeLocationIndex)
+                        ForEach(Array(locationStore.savedLocations.enumerated()), id: \.element.id) { i, loc in
+                            LocationCardView(loc: loc, isActive: i == locationStore.activeLocationIndex)
                                 .onTapGesture {
                                     HapticService.impact(.light)
                                     vm.switchLocation(to: i)
@@ -309,7 +310,7 @@ struct LocationsView: View {
             state:     r.state,
             latitude:  r.lat,
             longitude: r.lon,
-            sortOrder: vm.savedLocations.count
+            sortOrder: locationStore.savedLocations.count
         )
         vm.addLocation(loc)
         searchText = ""

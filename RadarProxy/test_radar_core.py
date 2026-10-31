@@ -2,9 +2,11 @@ import os
 import sys
 import unittest
 import gzip
+import io
 import json
 import math
 import tempfile
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -150,6 +152,35 @@ class RadarCoreTests(unittest.TestCase):
         self.assertEqual(app._lon_lat_to_tile(-180, 85.2, 2), (0, 0))
         self.assertEqual(app._lon_lat_to_tile(180, -85.2, 2), (3, 3))
 
+    def test_tile_render_scale_drops_to_one_past_configured_zoom(self) -> None:
+        old_cutoff = app.TILE_RENDER_SCALE_MAX_ZOOM
+        old_scale = app.TILE_RENDER_SCALE
+        try:
+            app.TILE_RENDER_SCALE_MAX_ZOOM = 7
+            app.TILE_RENDER_SCALE = 2
+            self.assertEqual(app._tile_render_scale(0), 2)
+            self.assertEqual(app._tile_render_scale(7), 2)
+            self.assertEqual(app._tile_render_scale(8), 1)
+            self.assertEqual(app._tile_render_scale(14), 1)
+        finally:
+            app.TILE_RENDER_SCALE_MAX_ZOOM = old_cutoff
+            app.TILE_RENDER_SCALE = old_scale
+
+    def test_render_tile_output_size_is_constant_across_the_new_deep_zoom_range(self) -> None:
+        # The deep-zoom extension (TILE_MAX_ZOOM now 14) must still produce a
+        # normal TILE_SIZE x TILE_SIZE PNG regardless of which supersampling
+        # branch `_tile_render_scale` picks for that zoom.
+        image = Image.new("RGBA", (app.GRID_WIDTH, app.GRID_HEIGHT), (10, 20, 30, 128))
+        west, south, east, north = app.RADAR_BBOX
+        lon = (west + east) / 2.0
+        lat = (south + north) / 2.0
+
+        for z in (6, 7, 8, app.TILE_MAX_ZOOM):
+            x, y = app._lon_lat_to_tile(lon, lat, z)
+            data = app._render_tile(image, z, x, y)
+            decoded = Image.open(io.BytesIO(data))
+            self.assertEqual(decoded.size, (app.TILE_SIZE, app.TILE_SIZE), f"zoom {z}")
+
     def test_region_sampler_uses_linear_radar_bbox_mapping(self) -> None:
         source = np.arange(100, dtype=np.float32).reshape((10, 10))
         west, south, east, north = app.RADAR_BBOX
@@ -202,6 +233,149 @@ class RadarCoreTests(unittest.TestCase):
         self.assertEqual(len(payload), 512)
         self.assertEqual(payload[0], 5)
         self.assertEqual(payload[256], 2)
+
+    def test_region_pack_without_window_args_keeps_legacy_behavior(self) -> None:
+        # Direct callers (and these tests) that don't pass window_start/
+        # window_end must keep getting every usable frame, unchanged from
+        # before the windowing feature existed.
+        rain = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
+        frames = [
+            app.RadarFrame(
+                frame_id=f"frame-{hour}",
+                time=datetime(2026, 7, 5, hour, tzinfo=timezone.utc),
+                is_forecast=False,
+                image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+                rain=rain,
+            )
+            for hour in (6, 10, 14)
+        ]
+        cache = app.RadarCache(loaded_at=1.0, frames=frames, tile_cache={})
+
+        packed = app._build_region_pack(cache, 50.0, 9.0, 130.0, 16)
+        header_raw, _ = gzip.decompress(packed).split(b"\n", 1)
+        header = json.loads(header_raw.decode("utf-8"))
+
+        self.assertEqual([f["id"] for f in header["frames"]], ["frame-6", "frame-10", "frame-14"])
+
+    def test_region_pack_window_filters_frames_outside_range(self) -> None:
+        rain = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
+        frames = [
+            app.RadarFrame(
+                frame_id=f"frame-{hour}",
+                time=datetime(2026, 7, 5, hour, tzinfo=timezone.utc),
+                is_forecast=False,
+                image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+                rain=rain,
+            )
+            for hour in (6, 10, 14)
+        ]
+        cache = app.RadarCache(loaded_at=1.0, frames=frames, tile_cache={})
+
+        packed = app._build_region_pack(
+            cache,
+            50.0,
+            9.0,
+            130.0,
+            16,
+            datetime(2026, 7, 5, 9, tzinfo=timezone.utc),
+            datetime(2026, 7, 5, 11, tzinfo=timezone.utc),
+        )
+        header_raw, _ = gzip.decompress(packed).split(b"\n", 1)
+        header = json.loads(header_raw.decode("utf-8"))
+
+        self.assertEqual([f["id"] for f in header["frames"]], ["frame-10"])
+
+    def test_region_pack_window_raises_when_nothing_matches(self) -> None:
+        rain = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
+        frame = app.RadarFrame(
+            frame_id="frame-6",
+            time=datetime(2026, 7, 5, 6, tzinfo=timezone.utc),
+            is_forecast=False,
+            image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+            rain=rain,
+        )
+        cache = app.RadarCache(loaded_at=1.0, frames=[frame], tile_cache={})
+
+        with self.assertRaises(app.HTTPException) as context:
+            app._build_region_pack(
+                cache,
+                50.0,
+                9.0,
+                130.0,
+                16,
+                datetime(2026, 7, 5, 20, tzinfo=timezone.utc),
+                datetime(2026, 7, 5, 21, tzinfo=timezone.utc),
+            )
+        self.assertEqual(context.exception.status_code, 404)
+
+    def test_region_pack_window_spans_observed_radar_and_icon_eu_model_together(self) -> None:
+        # The region-pack endpoint is the one seam between live radar and the
+        # ICON-EU model forecast: a window reaching two days out must come
+        # back with both an observed radar frame and a model frame in the
+        # same pack, not force the client to stitch two separate responses.
+        rain = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
+        observed = app.RadarFrame(
+            frame_id="DE1200_RV2607051000_000",
+            time=datetime(2026, 7, 5, 10, tzinfo=timezone.utc),
+            is_forecast=False,
+            image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+            rain=rain,
+        )
+        model = app.RadarFrame(
+            frame_id="iconraw--20260705T060000Z--036",
+            time=datetime(2026, 7, 6, 18, tzinfo=timezone.utc),  # +36h, within a 48h window
+            is_forecast=True,
+            image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+            rain=rain,
+        )
+        cache = app.RadarCache(loaded_at=1.0, frames=[observed, model], tile_cache={})
+
+        packed = app._build_region_pack(
+            cache,
+            50.0,
+            9.0,
+            130.0,
+            16,
+            datetime(2026, 7, 5, 9, tzinfo=timezone.utc),
+            datetime(2026, 7, 7, 10, tzinfo=timezone.utc),
+        )
+        header_raw, _ = gzip.decompress(packed).split(b"\n", 1)
+        header = json.loads(header_raw.decode("utf-8"))
+
+        self.assertEqual([f["id"] for f in header["frames"]], [observed.frame_id, model.frame_id])
+
+    def test_resolve_region_pack_window_all_skips_windowing(self) -> None:
+        self.assertEqual(app._resolve_region_pack_window("all", None, None), (None, None))
+
+    def test_resolve_region_pack_window_defaults_around_now(self) -> None:
+        before = datetime.now(timezone.utc)
+        start, end = app._resolve_region_pack_window("window", None, None)
+        after = datetime.now(timezone.utc)
+
+        expected_start_lower = before - app.timedelta(hours=app.REGION_PACK_DEFAULT_PAST_HOURS)
+        expected_start_upper = after - app.timedelta(hours=app.REGION_PACK_DEFAULT_PAST_HOURS)
+        self.assertTrue(expected_start_lower <= start <= expected_start_upper)
+
+        expected_end_lower = before + app.timedelta(hours=app.REGION_PACK_DEFAULT_FUTURE_HOURS)
+        expected_end_upper = after + app.timedelta(hours=app.REGION_PACK_DEFAULT_FUTURE_HOURS)
+        self.assertTrue(expected_end_lower <= end <= expected_end_upper)
+
+    def test_resolve_region_pack_window_honors_explicit_bounds(self) -> None:
+        start, end = app._resolve_region_pack_window(
+            "window", "2026-07-05T09:00:00Z", "2026-07-05T11:00:00Z"
+        )
+        self.assertEqual(start, datetime(2026, 7, 5, 9, tzinfo=timezone.utc))
+        self.assertEqual(end, datetime(2026, 7, 5, 11, tzinfo=timezone.utc))
+
+    def test_resolve_region_pack_window_rejects_inverted_bounds(self) -> None:
+        with self.assertRaises(app.HTTPException) as context:
+            app._resolve_region_pack_window("window", "2026-07-05T11:00:00Z", "2026-07-05T09:00:00Z")
+        self.assertEqual(context.exception.status_code, 400)
+
+    def test_resolve_region_pack_window_rejects_malformed_timestamp(self) -> None:
+        with self.assertRaises(app.HTTPException) as context:
+            app._resolve_region_pack_window("window", "not-a-date", None)
+        self.assertEqual(context.exception.status_code, 400)
 
     def test_dwd_rv_forecast_frames_keep_distinct_cache_and_pack_keys(self) -> None:
         rain_a = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
@@ -293,6 +467,121 @@ class RadarCoreTests(unittest.TestCase):
             image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
         )
 
+
+class DeepZoomHotspotWarmTests(unittest.TestCase):
+    """Deep zoom (10-14) pre-warming must stay scoped to the single active
+    location (set via /warm-location) and a compact radius around it, never
+    spread across every saved hotspot — that's what keeps it cheap enough
+    for the Beelink's 2 cores."""
+
+    def setUp(self) -> None:
+        self.saved_active = app._active_hotspot
+        self.saved_dynamic = list(app._dynamic_hotspots)
+        self.saved_tile_bytes = app._tile_bytes
+        self.saved_warm_stats = app._warm_stats
+        self.saved_workers = app.WARM_WORKERS
+        app.WARM_WORKERS = 1  # deterministic single-threaded task execution
+        app._dynamic_hotspots[:] = []
+
+    def tearDown(self) -> None:
+        app._active_hotspot = self.saved_active
+        app._dynamic_hotspots[:] = self.saved_dynamic
+        app._tile_bytes = self.saved_tile_bytes
+        app._warm_stats = self.saved_warm_stats
+        app.WARM_WORKERS = self.saved_workers
+        app._warming = False
+
+    def _run_warm_with_recorder(self) -> set:
+        rendered: set = set()
+
+        def fake_tile_bytes(cache, frame, z, x, y):
+            rendered.add((z, x, y))
+            return b"", True
+
+        app._tile_bytes = fake_tile_bytes
+        frame = app.RadarFrame(
+            frame_id="frame-0",
+            time=datetime(2026, 7, 5, 10, tzinfo=timezone.utc),
+            is_forecast=False,
+            image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
+        )
+        cache = app.RadarCache(loaded_at=1.0, frames=[frame], tile_cache={})
+        app._warm_tiles_background(cache, cache.loaded_at)
+        return rendered
+
+    def test_deep_zoom_tiles_are_only_warmed_for_the_active_location(self) -> None:
+        app._active_hotspot = (50.0, 9.0)
+        app._dynamic_hotspots[:] = [(50.0, 9.0), (52.0, 13.0)]  # active + another saved location, ~250km apart
+
+        rendered = self._run_warm_with_recorder()
+
+        active_deep_tiles = {
+            (z, x, y)
+            for z in app.HOTSPOT_DEEP_ZOOMS
+            for x, y in app._hotspot_view_tile_paths(z, 50.0, 9.0, app.HOTSPOT_DEEP_HALF_KM)
+        }
+        other_deep_tiles = {
+            (z, x, y)
+            for z in app.HOTSPOT_DEEP_ZOOMS
+            for x, y in app._hotspot_view_tile_paths(z, 52.0, 13.0, app.HOTSPOT_DEEP_HALF_KM)
+        }
+
+        self.assertTrue(rendered & active_deep_tiles, "expected the active location's deep-zoom tiles to be warmed")
+        self.assertFalse(
+            rendered & (other_deep_tiles - active_deep_tiles),
+            "the non-active saved location must not get deep-zoom pre-warming",
+        )
+
+    def test_deep_zoom_tiles_are_skipped_when_no_location_is_active(self) -> None:
+        app._active_hotspot = None
+        app._dynamic_hotspots[:] = [(50.0, 9.0)]
+
+        rendered = self._run_warm_with_recorder()
+
+        self.assertFalse({z for (z, x, y) in rendered if z in app.HOTSPOT_DEEP_ZOOMS})
+
+
+class WarmLocationEndpointTests(unittest.TestCase):
+    """/warm-location is the app's existing "this is now the active
+    location" signal (called on every switch/open) — it must record that
+    point as the active hotspot, not just add it to the general list."""
+
+    def setUp(self) -> None:
+        from fastapi.testclient import TestClient
+        import tempfile, pathlib
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        app.HOTSPOTS_STATE_PATH = pathlib.Path(self.tmp.name)
+        self.saved_active = app._active_hotspot
+        self.saved_dynamic = list(app._dynamic_hotspots)
+        self.saved_cache = app._cache
+        app._active_hotspot = None
+        app._dynamic_hotspots[:] = []
+        # Fresh, frame-less cache: _ensure_cache() returns it without any
+        # network call, and _schedule_tile_warm() no-ops on empty frames —
+        # this test is about the active-hotspot bookkeeping, not warming.
+        app._cache = app.RadarCache(loaded_at=time.time(), frames=[], tile_cache={})
+        self.client = TestClient(app.app)
+        self.headers = {"x-radar-token": "test-token"}
+
+    def tearDown(self) -> None:
+        app._active_hotspot = self.saved_active
+        app._dynamic_hotspots[:] = self.saved_dynamic
+        app._cache = self.saved_cache
+
+    def test_warm_location_sets_the_active_hotspot(self) -> None:
+        response = self.client.get("/warm-location", params={"lat": 50.1, "lon": 9.1}, headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["activeHotspot"], {"lat": 50.1, "lon": 9.1})
+        self.assertEqual(app._active_hotspot_snapshot(), {"lat": 50.1, "lon": 9.1})
+
+    def test_warm_location_moves_the_active_point_to_the_front_of_the_saved_list(self) -> None:
+        self.client.get("/warm-location", params={"lat": 50.1, "lon": 9.1}, headers=self.headers)
+        self.client.get("/warm-location", params={"lat": 52.5, "lon": 13.4}, headers=self.headers)
+
+        self.assertEqual(app._active_hotspot_snapshot(), {"lat": 52.5, "lon": 13.4})
+        self.assertEqual(app._dynamic_hotspots[0], (52.5, 13.4))
+        self.assertIn((50.1, 9.1), app._dynamic_hotspots)
 
 
 class PushRegistrationTests(unittest.TestCase):

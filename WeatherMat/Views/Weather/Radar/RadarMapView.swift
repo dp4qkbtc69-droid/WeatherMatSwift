@@ -177,6 +177,7 @@ struct RadarV2MapView: UIViewRepresentable {
         private var prewarmTask: Task<Void, Never>?
         private var dwdOverlays: [String: MKTileOverlay] = [:]
         private var regionChangeTask: Task<Void, Never>?
+        private var prewarmDebounceTask: Task<Void, Never>?
         private var frozenWMSLayerTime: Date?
         private var userAnnotation: MKPointAnnotation?
         private var suppressesTilePrefetch = false
@@ -205,7 +206,24 @@ struct RadarV2MapView: UIViewRepresentable {
                 clearTileRadar(in: mapView)
             } else {
                 updateTileOverlay(for: request, in: mapView)
-                prewarmNativeTiles(for: request, in: mapView)
+                // Debounced: `update()` runs on every relevant SwiftUI state
+                // change (not just pan/zoom — e.g. each incrementally
+                // rendered region-pack frame publishes a new render set), so
+                // without this, a burst of those would each kick off their
+                // own full tile-prefetch plan (up to 72 URLs × zoom levels ×
+                // neighbor frames) back to back.
+                schedulePrewarmNativeTiles(for: request, in: mapView)
+            }
+        }
+
+        private func schedulePrewarmNativeTiles(for request: RadarV2RenderRequest, in mapView: MKMapView) {
+            prewarmDebounceTask?.cancel()
+            prewarmDebounceTask = Task { [weak self, weak mapView] in
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled, let self, let mapView else { return }
+                await MainActor.run {
+                    self.prewarmNativeTiles(for: request, in: mapView)
+                }
             }
         }
 
@@ -213,8 +231,14 @@ struct RadarV2MapView: UIViewRepresentable {
             Task { await RadarTileReadinessCenter.shared.invalidateAll() }
             regionChangeTask?.cancel()
             if let request {
+                // 300 ms of quiet after the last region-change tick (MapKit
+                // fires this repeatedly while the user is actively dragging/
+                // pinching, not just once at the end) before swapping
+                // overlays, prefetching tiles, or asking for a region-pack
+                // reload — keeps an active pan/zoom from firing hundreds of
+                // parallel tile and region-pack requests.
                 regionChangeTask = Task { [weak self, weak mapView] in
-                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    try? await Task.sleep(nanoseconds: 300_000_000)
                     guard !Task.isCancelled, let self, let mapView else { return }
                     await MainActor.run {
                         if self.updateRegionOverlayIfPossible(for: request, in: mapView) {
@@ -352,6 +376,10 @@ struct RadarV2MapView: UIViewRepresentable {
             overlay.canReplaceMapContent = false
             overlay.tileSize = CGSize(width: 512, height: 512)
             overlay.minimumZ = 3
+            // Intentionally dynamic rather than a fixed cap: tracks whatever
+            // the proxy reports it can render (RadarProxy's TILE_MAX_ZOOM,
+            // currently up to 14), so raising that server-side limit alone
+            // is enough to unlock deeper zoom here.
             overlay.maximumZ = request.tileMaxZoom
             activeTileOverlay = overlay
             activeTileRenderer = nil
@@ -421,6 +449,7 @@ struct RadarV2MapView: UIViewRepresentable {
 
         private func clearRadar(in mapView: MKMapView) {
             prewarmTask?.cancel()
+            prewarmDebounceTask?.cancel()
             regionChangeTask?.cancel()
             clearRegionRadar(in: mapView)
             clearTileRadar(in: mapView)
@@ -428,6 +457,7 @@ struct RadarV2MapView: UIViewRepresentable {
 
         private func clearTileRadar(in mapView: MKMapView) {
             prewarmTask?.cancel()
+            prewarmDebounceTask?.cancel()
             if let activeTileOverlay {
                 mapView.removeOverlay(activeTileOverlay)
             }
@@ -545,7 +575,7 @@ struct RadarV2TilePrefetchPlan {
         await withTaskGroup(of: Bool.self) { group in
             for url in urls {
                 group.addTask {
-                    var request = RainRadarService.authenticatedDwdRadarRequest(url, cachePolicy: .returnCacheDataElseLoad)
+                    var request = RainRadarService.shared.authenticatedDwdRadarRequest(url, cachePolicy: .returnCacheDataElseLoad)
                     request.timeoutInterval = 8
                     do {
                         let (_, response) = try await URLSession.shared.data(for: request)
@@ -613,7 +643,7 @@ final class RadarV2TileOverlay: MKTileOverlay {
             super.loadTile(at: path, result: result)
             return
         }
-        var tileRequest = RainRadarService.authenticatedDwdRadarRequest(url, cachePolicy: .returnCacheDataElseLoad)
+        var tileRequest = RainRadarService.shared.authenticatedDwdRadarRequest(url, cachePolicy: .returnCacheDataElseLoad)
         tileRequest.timeoutInterval = 10
         URLSession.shared.dataTask(with: tileRequest) { data, response, error in
             if let error {

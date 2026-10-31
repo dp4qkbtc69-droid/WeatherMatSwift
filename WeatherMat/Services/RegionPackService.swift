@@ -70,33 +70,80 @@ struct RadarRegionPack: Equatable, Sendable {
     }
 }
 
-enum RegionPackService {
-    private static let logger = Logger(subsystem: "de.praxishartlep.weathermat", category: "RegionPack")
+/// What `RegionPackController` needs from the region-pack loader, abstracted
+/// so tests can inject a stub instead of hitting the network.
+/// `RegionPackService.shared` is the default, production-backed conformer.
+protocol RegionPackServiceProtocol: Sendable {
+    func fetchRegionPack(
+        latitude: Double,
+        longitude: Double,
+        km: Double,
+        startTime: Date?,
+        endTime: Date?
+    ) async throws -> RadarRegionPack
+}
 
-    static func fetchRegionPack(latitude: Double, longitude: Double, km: Double = 130.0) async throws -> RadarRegionPack {
-        guard let baseURL = RainRadarService.proxyBaseURL else { throw URLError(.badURL) }
+extension RegionPackServiceProtocol {
+    /// Convenience overload matching the concrete type's default parameters —
+    /// protocol requirements can't carry default argument values themselves.
+    func fetchRegionPack(latitude: Double, longitude: Double, km: Double = 130.0) async throws -> RadarRegionPack {
+        try await fetchRegionPack(latitude: latitude, longitude: longitude, km: km, startTime: nil, endTime: nil)
+    }
+}
+
+final class RegionPackService: RegionPackServiceProtocol, @unchecked Sendable {
+    static let shared = RegionPackService()
+
+    private let logger = Logger(subsystem: "de.praxishartlep.weathermat", category: "RegionPack")
+    private let rainRadarService: RainRadarServiceProtocol
+
+    init(rainRadarService: RainRadarServiceProtocol = RainRadarService.shared) {
+        self.rainRadarService = rainRadarService
+    }
+
+    /// Fetches a region pack. By default (`startTime`/`endTime` both `nil`)
+    /// the server applies its own sliding window around "now" — pass the
+    /// actively visible timeline window explicitly so a scrub into the
+    /// forecast or far history still gets frames the client can render.
+    func fetchRegionPack(
+        latitude: Double,
+        longitude: Double,
+        km: Double = 130.0,
+        startTime: Date? = nil,
+        endTime: Date? = nil
+    ) async throws -> RadarRegionPack {
+        guard let baseURL = await rainRadarService.resolvedProxyBaseURL() else { throw URLError(.badURL) }
         guard var components = URLComponents(url: baseURL.appending(path: "region-pack"), resolvingAgainstBaseURL: false) else {
             throw URLError(.badURL)
         }
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "lat", value: String(format: "%.5f", latitude)),
             URLQueryItem(name: "lon", value: String(format: "%.5f", longitude)),
-            URLQueryItem(name: "km", value: String(format: "%.1f", km)),
-            URLQueryItem(name: "frames", value: "all")
+            URLQueryItem(name: "km", value: String(format: "%.1f", km))
         ]
+        if let startTime {
+            queryItems.append(URLQueryItem(name: "start_time", value: startTime.ISO8601Format()))
+        }
+        if let endTime {
+            queryItems.append(URLQueryItem(name: "end_time", value: endTime.ISO8601Format()))
+        }
+        components.queryItems = queryItems
         guard let url = components.url else { throw URLError(.badURL) }
 
-        var request = RainRadarService.authenticatedDwdRadarRequest(url, cachePolicy: .reloadIgnoringLocalCacheData)
+        var request = rainRadarService.authenticatedDwdRadarRequest(url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.timeoutInterval = 20
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
-        let pack = try decode(data: data)
+        let pack = try Self.decode(data: data)
         logger.info("Region pack loaded: \(pack.frames.count, privacy: .public) frames, \(data.count, privacy: .public) bytes")
         return pack
     }
 
+    /// Pure/stateless string transform — stays a type-level utility rather
+    /// than an injected dependency; several other radar types call it
+    /// directly (`RadarV2Store`, `RainRadarScreen`, `RadarRegionPack` itself).
     static func regionFrameID(from frame: RainRadarFrame) -> String {
         if frame.path.hasPrefix("/tiles/") {
             return String(frame.path.dropFirst("/tiles/".count))

@@ -14,6 +14,21 @@ final class RadarV2Store {
     var isBuffering = false
     var errorMessage: String?
     private var cachedVisibleFrames: [RainRadarFrame] = []
+    /// Region-pack frame id -> timeline frame id, for signaling
+    /// `RadarTileReadinessCenter` once a region image finishes rendering.
+    /// Rebuilt only here, when the timeline itself actually changes — not on
+    /// every render-window recomputation (which used to happen on a 220 ms
+    /// timer regardless of whether anything changed).
+    private(set) var regionFrameIDToTimelineFrameID: [String: String] = [:]
+
+    // `var`, not `let`: mutating `preloadedTimeline` through an existential
+    // protocol value requires the holder itself to be mutable, even though
+    // the production conformer (a class) only ever mutates its own state.
+    private var rainRadarService: RainRadarServiceProtocol
+
+    init(rainRadarService: RainRadarServiceProtocol = RainRadarService.shared) {
+        self.rainRadarService = rainRadarService
+    }
 
     var visibleFrames: [RainRadarFrame] {
         cachedVisibleFrames
@@ -29,7 +44,10 @@ final class RadarV2Store {
         return RadarV2RenderRequest(
             host: timeline.host,
             source: timeline.source,
-            tileMaxZoom: timeline.tileMaxZoom ?? 8,
+            // The DWD timeline response always sets this (currently up to
+            // 14 — see RadarProxy's TILE_MAX_ZOOM); this default only
+            // matters for the near-impossible case of a malformed response.
+            tileMaxZoom: timeline.tileMaxZoom ?? 14,
             frame: selectedFrame,
             neighborFrames: prewarmFrames(around: selectedFrame)
         )
@@ -105,13 +123,13 @@ final class RadarV2Store {
 
     func load() async {
         guard timeline == nil else { return }
-        if let cached = RainRadarService.loadCachedTimeline() {
+        if let cached = rainRadarService.loadCachedTimeline() {
             apply(cached, preservingSelection: false)
             Task { await refreshAndExtend(over: cached) }
             return
         }
 
-        if let preloaded = RainRadarService.preloadedTimeline {
+        if let preloaded = rainRadarService.preloadedTimeline {
             apply(preloaded, preservingSelection: false)
             Task { await refreshAndExtend(over: preloaded) }
             return
@@ -120,9 +138,9 @@ final class RadarV2Store {
         isLoading = true
         errorMessage = nil
         do {
-            let loaded = try await RainRadarService.fetchTimeline()
-            RainRadarService.preloadedTimeline = loaded
-            RainRadarService.saveTimelineCache(loaded)
+            let loaded = try await rainRadarService.fetchTimeline()
+            rainRadarService.preloadedTimeline = loaded
+            rainRadarService.saveTimelineCache(loaded)
             apply(loaded, preservingSelection: false)
             isLoading = false
         } catch {
@@ -145,9 +163,9 @@ final class RadarV2Store {
     }
 
     private func refreshAndExtend(over prior: RainRadarTimeline) async {
-        guard let fresh = try? await RainRadarService.fetchTimeline() else { return }
-        RainRadarService.preloadedTimeline = fresh
-        RainRadarService.saveTimelineCache(fresh)
+        guard let fresh = try? await rainRadarService.fetchTimeline() else { return }
+        rainRadarService.preloadedTimeline = fresh
+        rainRadarService.saveTimelineCache(fresh)
         apply(fresh, preservingSelection: true)
     }
 
@@ -155,6 +173,12 @@ final class RadarV2Store {
         let selectedTime = preservingSelection ? selectedFrame?.time : nil
         timeline = next
         cachedVisibleFrames = Self.visibleFrames(in: next)
+        var readinessLookup: [String: String] = [:]
+        readinessLookup.reserveCapacity(cachedVisibleFrames.count)
+        for frame in cachedVisibleFrames {
+            readinessLookup[RegionPackService.regionFrameID(from: frame)] = frame.id
+        }
+        regionFrameIDToTimelineFrameID = readinessLookup
         let frames = visibleFrames
         if let selectedTime,
            let nearest = frames.indices.min(by: {
@@ -179,6 +203,32 @@ final class RadarV2Store {
                 let nextIndex = index + offset
                 return visibleFrames.indices.contains(nextIndex) ? visibleFrames[nextIndex] : nil
             }
+    }
+
+    /// Ordered list of frames to keep rendered for the region-pack overlay:
+    /// the current selection first, then alternating forward/backward
+    /// neighbors out to `radius` (closest first). Used by `RegionPackController`
+    /// to decide which pre-rendered images to keep warm whenever the
+    /// selection changes — a different radius/ordering than `prewarmFrames`,
+    /// which is about tile prefetching for playback, not region-pack images.
+    func regionRenderWindow(radius: Int) -> [RainRadarFrame] {
+        guard !visibleFrames.isEmpty else {
+            return selectedFrame.map { [$0] } ?? []
+        }
+        var ordered: [RainRadarFrame] = []
+        if let selectedFrame { ordered.append(selectedFrame) }
+        let start = min(selectedIndex, visibleFrames.count - 1)
+        for offset in 1...radius {
+            let forwardIndex = start + offset
+            if visibleFrames.indices.contains(forwardIndex) {
+                ordered.append(visibleFrames[forwardIndex])
+            }
+            let backwardIndex = start - offset
+            if visibleFrames.indices.contains(backwardIndex) {
+                ordered.append(visibleFrames[backwardIndex])
+            }
+        }
+        return ordered
     }
 
     // Keeps 24 h of history before the newest observation and up to 120 h of

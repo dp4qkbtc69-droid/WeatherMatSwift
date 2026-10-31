@@ -3,6 +3,7 @@ import MapKit
 
 struct Where2GoView: View {
     @Environment(WeatherViewModel.self) private var vm
+    @Environment(LocationStore.self) private var locationStore
     @State private var selectedSpot: Where2GoSpot?
     @State private var isExpanded = false
 
@@ -51,7 +52,7 @@ struct Where2GoView: View {
         .padding(16)
         .glassCard()
         .sheet(item: $selectedSpot) { spot in
-            Where2GoMapSheet(origin: vm.activeLocation, spot: spot)
+            Where2GoMapSheet(origin: locationStore.activeLocation, spot: spot)
                 .presentationDetents([.medium, .large])
         }
     }

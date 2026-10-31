@@ -128,6 +128,162 @@ struct RadarLogicTests {
         #expect(buckets[0].range == 0...1)
     }
 
+    // MARK: - Timeline-Tick-Vorberechnung
+
+    @Test func tickDisplayAlwaysShowsBucketBoundariesAndOnTheHourFrames() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 7
+        components.day = 1
+        components.hour = 10
+        components.minute = 0
+        components.timeZone = calendar.timeZone
+        let start = calendar.date(from: components)!
+
+        // 6 frames, 15 min apart: 10:00, 10:15, 10:30, 10:45, 11:00, 11:15.
+        // Small bucket (≤12 frames) -> step 1, so every on-the-hour frame shows.
+        let frames = (0..<6).map { offset in
+            RainRadarFrame(
+                time: start.addingTimeInterval(Double(offset) * 15 * 60),
+                path: "/tiles/tick-\(offset)",
+                isForecast: false,
+                sourceKind: .dwdRadar,
+                precipitationType: .unknown,
+                referenceTime: nil
+            )
+        }
+        let buckets = RadarTimelineControl.makeBuckets(frames, calendar: calendar)
+        #expect(buckets.count == 1)
+
+        let display = RadarTimelineControl.computeTickDisplay(frames: frames, buckets: buckets, calendar: calendar)
+
+        // Boundaries (index 0 and last) always show, regardless of minute.
+        #expect(display.showLabel[0] == true)
+        #expect(display.showLabel[5] == true)
+        // 10:00 and 11:00 are on-the-hour and multiples of step 1 -> show.
+        #expect(display.showLabel[4] == true)
+        // 10:15, 10:30, 10:45 are neither boundary nor on-the-hour -> hidden.
+        #expect(display.showLabel[1] == false)
+        #expect(display.showLabel[2] == false)
+        #expect(display.showLabel[3] == false)
+        // Hidden ticks carry no formatting cost/text; shown ones do.
+        #expect(display.labels[1].isEmpty)
+        #expect(!display.labels[0].isEmpty)
+    }
+
+    @Test func tickDisplayScalesStepWithBucketSizeNotGlobalFrameCount() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+
+        // One big bucket (20 hourly frames, same day -> step 3) directly
+        // followed by one small bucket (3 hourly frames, next day -> step 1),
+        // so the big bucket's step can't leak into the small one's decisions.
+        var bigStart = DateComponents()
+        bigStart.year = 2026
+        bigStart.month = 7
+        bigStart.day = 1
+        bigStart.hour = 0
+        bigStart.timeZone = calendar.timeZone
+        let bigBucketStart = calendar.date(from: bigStart)!
+        let bigFrames = (0..<20).map { hour in
+            RainRadarFrame(
+                time: bigBucketStart.addingTimeInterval(Double(hour) * 3600),
+                path: "/tiles/big-\(hour)",
+                isForecast: false,
+                sourceKind: .dwdRadar,
+                precipitationType: .unknown,
+                referenceTime: nil
+            )
+        }
+        var smallStart = DateComponents()
+        smallStart.year = 2026
+        smallStart.month = 7
+        smallStart.day = 2
+        smallStart.hour = 1
+        smallStart.timeZone = calendar.timeZone
+        let smallBucketStart = calendar.date(from: smallStart)!
+        let smallFrames = (0..<3).map { hour in
+            RainRadarFrame(
+                time: smallBucketStart.addingTimeInterval(Double(hour) * 3600),
+                path: "/tiles/small-\(hour)",
+                isForecast: false,
+                sourceKind: .dwdRadar,
+                precipitationType: .unknown,
+                referenceTime: nil
+            )
+        }
+        let frames = bigFrames + smallFrames
+        let buckets = RadarTimelineControl.makeBuckets(frames, calendar: calendar)
+        #expect(buckets.count == 2)
+        #expect(buckets[0].range == 0...19)
+        #expect(buckets[1].range == 20...22)
+
+        let display = RadarTimelineControl.computeTickDisplay(frames: frames, buckets: buckets, calendar: calendar)
+
+        // Big bucket, step 3: hour 1 (interior, not a multiple of 3) hidden.
+        #expect(display.showLabel[1] == false)
+        // Big bucket, step 3: hour 3 (interior, multiple of 3) shown.
+        #expect(display.showLabel[3] == true)
+        // Small bucket's middle frame (global index 21, clock hour 2): not a
+        // multiple of 3 (the *big* bucket's step), so a global/leaked step
+        // would hide it — but its own bucket only has 3 frames (step 1), so
+        // it correctly still shows.
+        let smallMiddleIndex = bigFrames.count + 1
+        #expect(display.showLabel[smallMiddleIndex] == true)
+    }
+
+    // MARK: - Radar/Nowcast/Modell-Kategorisierung
+
+    @Test func categoryClassifiesObservedNowcastAndModelFrames() {
+        #expect(RadarTimelineControl.category(for: frame(minutes: 0)) == .observed)
+        #expect(RadarTimelineControl.category(for: frame(minutes: 30, isForecast: true, sourceKind: .dwdRadar)) == .nowcast)
+        #expect(RadarTimelineControl.category(for: frame(minutes: 30, isForecast: true, sourceKind: .rainViewer)) == .nowcast)
+        #expect(RadarTimelineControl.category(for: frame(minutes: 180, isForecast: true, sourceKind: .iconEuRaw)) == .model)
+        #expect(RadarTimelineControl.category(for: frame(minutes: 180, isForecast: true, sourceKind: .iconEu)) == .model)
+    }
+
+    @Test func categoryTransitionsMarksBothHandoffsWhenANowcastWindowExists() {
+        let frames = [
+            frame(minutes: -10),
+            frame(minutes: 0),
+            frame(minutes: 30, isForecast: true, sourceKind: .dwdRadar),
+            frame(minutes: 60, isForecast: true, sourceKind: .dwdRadar),
+            frame(minutes: 180, isForecast: true, sourceKind: .iconEuRaw),
+            frame(minutes: 240, isForecast: true, sourceKind: .iconEuRaw)
+        ]
+
+        let transitions = RadarTimelineControl.categoryTransitions(frames)
+
+        #expect(transitions.count == 2)
+        #expect(transitions[0].index == 2)
+        #expect(transitions[0].category == .nowcast)
+        #expect(transitions[1].index == 4)
+        #expect(transitions[1].category == .model)
+    }
+
+    @Test func categoryTransitionsMarksOnlyOneHandoffWhenModelStartsImmediately() {
+        let frames = [
+            frame(minutes: -10),
+            frame(minutes: 0),
+            frame(minutes: 60, isForecast: true, sourceKind: .iconEuRaw)
+        ]
+
+        let transitions = RadarTimelineControl.categoryTransitions(frames)
+
+        #expect(transitions.count == 1)
+        #expect(transitions[0].index == 2)
+        #expect(transitions[0].category == .model)
+    }
+
+    @Test func categoryTransitionsIsEmptyForPurelyObservedFrames() {
+        let frames = [frame(minutes: -10), frame(minutes: 0)]
+        #expect(RadarTimelineControl.categoryTransitions(frames).isEmpty)
+        #expect(RadarTimelineControl.categoryTransitions([]).isEmpty)
+    }
+
     // MARK: - WMS-Zeitraster
 
     @Test func fiveMinuteBucketRoundsDownToProductGrid() {

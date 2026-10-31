@@ -2,24 +2,39 @@
 import Foundation
 import CoreLocation
 
-final class EnsembleService: Sendable {
+/// What `WeatherViewModel` needs from the ensemble weather fetch, abstracted
+/// so unit tests can inject a stub instead of hitting WeatherKit/Open-Meteo/
+/// Netatmo etc. over the network. `EnsembleService.shared` is the default,
+/// production-backed conformer.
+protocol EnsembleServiceProtocol: Sendable {
+    func fetch(for location: CLLocation) async -> EnsembleWeatherData
+}
+
+final class EnsembleService: EnsembleServiceProtocol, Sendable {
 
     static let shared = EnsembleService()
-    private init() {}
+
+    // OpenMeteo (best_match) is the mandatory base — always reliable, 14-day
+    // daily. WeatherKit + ECMWF add quality when available; failures are
+    // silently dropped. Each conforms to `WeatherProviding`, so a test can
+    // swap this list for stubs via `init(providers:)` instead of only ever
+    // hitting the real services behind `.shared`/the static OpenMeteoService
+    // instances.
+    private let providers: [WeatherProviding]
+
+    init(providers: [WeatherProviding] = [
+        WeatherKitService.shared,
+        OpenMeteoService.bestMatch,
+        OpenMeteoService.icon,      // DWD ICON — most accurate for Germany 0–72 h
+        OpenMeteoService.ecmwf,
+    ]) {
+        self.providers = providers
+    }
 
     // MARK: - Public fetch
     /// Fires weather models in parallel, then combines into a single weighted result.
     /// BrightSky is excluded from weather providers (48 h only) but used for DWD warnings.
     func fetch(for location: CLLocation) async -> EnsembleWeatherData {
-        // OpenMeteo (best_match) is the mandatory base — always reliable, 14-day daily.
-        // WeatherKit + ECMWF add quality when available; failures are silently dropped.
-        let providers: [WeatherProviding] = [
-            WeatherKitService.shared,
-            OpenMeteoService.bestMatch,
-            OpenMeteoService.icon,      // DWD ICON — most accurate for Germany 0–72 h
-            OpenMeteoService.ecmwf,
-        ]
-
         // Parallel fetch – each provider has a hard 6-second cap
         var results: [ModelWeatherData] = []
         await withTaskGroup(of: ModelWeatherData?.self) { group in

@@ -12,18 +12,22 @@
 		0A12613BA093A989EE7300B5 /* WeatherKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 932F42A0FC4EF8D453CF3F2C /* WeatherKit.framework */; };
 		1D63D26BB8AA66A3A17ABE36 /* WeatherMatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */; };
 		1E24A5AA3BA4B4B802E15309 /* EnsembleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B470F12426BB9567B938E302 /* EnsembleLogicTests.swift */; };
+		F6549FC20A1B80A8FF868781 /* ServiceDependencyInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */; };
+		27FF0F08EE7E2BD3E974F0A6 /* WeatherCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */; };
 		206B856EAEFCFF82DA21494F /* WatchWeatherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FECA4B5C2E336F3BF03D7D85 /* WatchWeatherViewModel.swift */; };
 		3454EA341C34508AFA6FC94D /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D816A840CA115017249F019 /* CoreLocation.framework */; };
 		3587BB562E549B4FDA0B575F /* WeatherMatWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1955EEFD6D61223911DCE83 /* WeatherMatWatchApp.swift */; };
 		38778D4610DFE9FDC59DF8EB /* WatchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17A3E69E0351E3234F9FBFE /* WatchModels.swift */; };
 		3BE4056F2AA674EA5DD813E2 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 47B17E002281FB1F3ACA2ACD /* WatchConnectivity.framework */; };
 		3FB076D6E51D7DED08A1AB17 /* WeatherComplicationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DAD4B72FAF49B5B90289AF4 /* WeatherComplicationView.swift */; };
+		44EC2CE4A5104498ACE312B6 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 365D4B0310B7C38E6AE1F7FD /* SwiftUI.framework */; };
 		4C20DB4B61745D39140B8788 /* LocationSyncReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C9A64D78F15DDBDCB3CB23B /* LocationSyncReceiver.swift */; };
 		4D3B1F38CE3C31E0C90496F7 /* WeatherMatWatchWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 387BD144F13D9A232B76B17F /* WeatherMatWatchWidgetsBundle.swift */; };
 		51CE192F1411A60730AF21FA /* WeatherMatSwiftTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90B641CF24AC0C0C89D5285C /* WeatherMatSwiftTesting.swift */; };
 		54025F3A5E837DB8A15DDE6D /* MapKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 084D10516E7127C94BA7CA73 /* MapKit.framework */; };
 		5D3FC6DB7E6FDBE7539FDBFC /* WatchSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13159EA7F63E20E5BAE2EDEC /* WatchSharedStore.swift */; };
 		729EB13D73B1419B2B91DEDE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CECFD0FB4E01520B04E1828E /* ContentView.swift */; };
+		74A03DB6E6AC44BF9868A626 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 119F2441DA73BFBF3A35E49F /* WidgetKit.framework */; };
 		794E09EF06CCB328B348E1FB /* WatchLocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26100C5E68419642B7152789 /* WatchLocationProvider.swift */; };
 		8048F90F27026B76E2AFCFA5 /* LocationPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50981A1F9621DAF9B309313 /* LocationPickerView.swift */; };
 		8B7ED2C1E3B26845B9E79BE8 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D816A840CA115017249F019 /* CoreLocation.framework */; };
@@ -32,8 +36,11 @@
 		A0EAF748BAB113E4F663BD47 /* WeatherMatWatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B77A6B458160A1EE9D33F965 /* WeatherMatWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A1F9FC3348D9530BDA0D45DF /* WeatherKitFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F3B82F80C5E22E2D0DC9E3 /* WeatherKitFetcher.swift */; };
 		A3AB5555704DA03D7BF5613B /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B72624B834454D82389004F2 /* XCTest.framework */; };
+		A6DB753F011446E284CD54D5 /* WeatherMatWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 67C3AF23C29748D28368DE65 /* WeatherMatWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		AAD4E1FAA4FB504617C3DB78 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0E2C975FE166F84F4828E2C /* BackgroundTasks.framework */; };
+		B338AC65A5C44FB1BFCC425E /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 563CC27F61414492848C7E14 /* ActivityKit.framework */; };
 		B60156141527AA191B396F31 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D816A840CA115017249F019 /* CoreLocation.framework */; };
+		B9427C7A05BD420596B588B0 /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 563CC27F61414492848C7E14 /* ActivityKit.framework */; };
 		BC9EB2ABC8E79ABD38D454C3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4E1986489C6515970A2F87D8 /* Assets.xcassets */; };
 		C2EB353CB61CF6AA61857E62 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 119F2441DA73BFBF3A35E49F /* WidgetKit.framework */; };
 		C6665A4FB9FFAEE54C1C01A8 /* RadarLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 062FD7A808627CE0D0C6DA77 /* RadarLogicTests.swift */; };
@@ -62,6 +69,13 @@
 			remoteGlobalIDString = EAEF942532D6E2F396B08489;
 			remoteInfo = WeatherMatWatch;
 		};
+		55FA32EA030241FA9B944983 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 767EADA8A75C26B714BBEBB5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 58EEB1056DCA46F1B3D1DEC8;
+			remoteInfo = WeatherMatWidgets;
+		};
 		749F32A49373C4119C63FAF7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 767EADA8A75C26B714BBEBB5 /* Project object */;
@@ -81,6 +95,17 @@
 				E83ED223BE616432ECA3A40F /* WeatherMatWatch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5F540F5E91794E90A978219E /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A6DB753F011446E284CD54D5 /* WeatherMatWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D02501BD6E46B9BC4C8AE100 /* Embed Foundation Extensions */ = {
@@ -109,7 +134,11 @@
 		47B17E002281FB1F3ACA2ACD /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
 		4DAD4B72FAF49B5B90289AF4 /* WeatherComplicationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherComplicationView.swift; sourceTree = "<group>"; };
 		4E1986489C6515970A2F87D8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		563CC27F61414492848C7E14 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
+		67C3AF23C29748D28368DE65 /* WeatherMatWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WeatherMatWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherMatTests.swift; sourceTree = "<group>"; };
+		7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceDependencyInjectionTests.swift; sourceTree = "<group>"; };
+		712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherCacheStoreTests.swift; sourceTree = "<group>"; };
 		7382D5D6B32A911786C1EB1C /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
 		745D35260B3A5713055E5C54 /* WeatherMatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WeatherMatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D816A840CA115017249F019 /* CoreLocation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreLocation.framework; path = System/Library/Frameworks/CoreLocation.framework; sourceTree = SDKROOT; };
@@ -153,6 +182,16 @@
 			path = WeatherMat;
 			sourceTree = "<group>";
 		};
+		5654D0B2F36746F6BD92EF8A /* WeatherMatShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WeatherMatShared;
+			sourceTree = "<group>";
+		};
+		66BA5E9B21F645C6A43DFD5A /* WeatherMatWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WeatherMatWidgets;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -175,6 +214,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		84082F35A5344E82B1113E4B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B9427C7A05BD420596B588B0 /* ActivityKit.framework in Frameworks */,
+				74A03DB6E6AC44BF9868A626 /* WidgetKit.framework in Frameworks */,
+				44EC2CE4A5104498ACE312B6 /* SwiftUI.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9674A721D5486B582CC86A91 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -191,6 +240,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9015F6C108E391F019F1B453 /* WeatherKit.framework in Frameworks */,
+				B338AC65A5C44FB1BFCC425E /* ActivityKit.framework in Frameworks */,
 				3454EA341C34508AFA6FC94D /* CoreLocation.framework in Frameworks */,
 				54025F3A5E837DB8A15DDE6D /* MapKit.framework in Frameworks */,
 				AAD4E1FAA4FB504617C3DB78 /* BackgroundTasks.framework in Frameworks */,
@@ -210,6 +260,7 @@
 				745D35260B3A5713055E5C54 /* WeatherMatTests.xctest */,
 				11483069810BC934246E7534 /* WeatherMatWatch.app */,
 				B77A6B458160A1EE9D33F965 /* WeatherMatWatchWidgets.appex */,
+				67C3AF23C29748D28368DE65 /* WeatherMatWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -244,11 +295,22 @@
 			isa = PBXGroup;
 			children = (
 				4A8E72C13025BC0300298DCC /* WeatherMat */,
+				66BA5E9B21F645C6A43DFD5A /* WeatherMatWidgets */,
+				5654D0B2F36746F6BD92EF8A /* WeatherMatShared */,
 				7F349D5523E8EE2B93071BF6 /* WeatherMatTests */,
 				9E4CE8364E36DAF02989F4B1 /* WeatherMatWatch */,
 				87C905DA3530A28D7E3181B4 /* Frameworks */,
 				035422FE0BB62CADED5218FA /* Products */,
+				4A2F7504302BA2180091DAAD /* Recovered References */,
 			);
+			sourceTree = "<group>";
+		};
+		4A2F7504302BA2180091DAAD /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				563CC27F61414492848C7E14 /* ActivityKit.framework */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 		6B38DB5B964271E5D736358C /* Widgets */ = {
@@ -268,8 +330,10 @@
 			children = (
 				B470F12426BB9567B938E302 /* EnsembleLogicTests.swift */,
 				062FD7A808627CE0D0C6DA77 /* RadarLogicTests.swift */,
+				7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */,
 				90B641CF24AC0C0C89D5285C /* WeatherMatSwiftTesting.swift */,
 				6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */,
+				712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */,
 			);
 			path = WeatherMatTests;
 			sourceTree = "<group>";
@@ -341,6 +405,28 @@
 			productReference = B77A6B458160A1EE9D33F965 /* WeatherMatWatchWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		58EEB1056DCA46F1B3D1DEC8 /* WeatherMatWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E340DAA57726408DBA7AD78B /* Build configuration list for PBXNativeTarget "WeatherMatWidgets" */;
+			buildPhases = (
+				1DFB02A6009A447990A6173F /* Sources */,
+				84082F35A5344E82B1113E4B /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5654D0B2F36746F6BD92EF8A /* WeatherMatShared */,
+				66BA5E9B21F645C6A43DFD5A /* WeatherMatWidgets */,
+			);
+			name = WeatherMatWidgets;
+			packageProductDependencies = (
+			);
+			productName = WeatherMatWidgets;
+			productReference = 67C3AF23C29748D28368DE65 /* WeatherMatWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		C25AE85CD88EA8DBA49B2C8F /* WeatherMat */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E2E8A7DED8E01DA43AA0098D /* Build configuration list for PBXNativeTarget "WeatherMat" */;
@@ -349,14 +435,17 @@
 				2CCDA6139233AAF1BFC2E3A4 /* Resources */,
 				BCDAA119E62C724170BC5DCA /* Frameworks */,
 				4038CA13785C5B27B83391F3 /* Embed Watch Content */,
+				5F540F5E91794E90A978219E /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				4494F992A8E1E9C096B62225 /* PBXTargetDependency */,
+				E31216FC2CD94E2E9E8D225F /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				4A8E72C13025BC0300298DCC /* WeatherMat */,
+				5654D0B2F36746F6BD92EF8A /* WeatherMatShared */,
 			);
 			name = WeatherMat;
 			packageProductDependencies = (
@@ -401,6 +490,9 @@
 					2DC6F96D3F97515607B99E0D = {
 						DevelopmentTeam = 5P532N3MK4;
 					};
+					58EEB1056DCA46F1B3D1DEC8 = {
+						DevelopmentTeam = 5P532N3MK4;
+					};
 					C25AE85CD88EA8DBA49B2C8F = {
 						DevelopmentTeam = 5P532N3MK4;
 					};
@@ -427,6 +519,7 @@
 				26DA9115F86D4CA570626EF2 /* WeatherMatTests */,
 				EAEF942532D6E2F396B08489 /* WeatherMatWatch */,
 				2DC6F96D3F97515607B99E0D /* WeatherMatWatchWidgets */,
+				58EEB1056DCA46F1B3D1DEC8 /* WeatherMatWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -456,8 +549,17 @@
 			files = (
 				1E24A5AA3BA4B4B802E15309 /* EnsembleLogicTests.swift in Sources */,
 				C6665A4FB9FFAEE54C1C01A8 /* RadarLogicTests.swift in Sources */,
+				F6549FC20A1B80A8FF868781 /* ServiceDependencyInjectionTests.swift in Sources */,
 				51CE192F1411A60730AF21FA /* WeatherMatSwiftTesting.swift in Sources */,
 				1D63D26BB8AA66A3A17ABE36 /* WeatherMatTests.swift in Sources */,
+				27FF0F08EE7E2BD3E974F0A6 /* WeatherCacheStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1DFB02A6009A447990A6173F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -514,6 +616,11 @@
 			isa = PBXTargetDependency;
 			target = C25AE85CD88EA8DBA49B2C8F /* WeatherMat */;
 			targetProxy = 749F32A49373C4119C63FAF7 /* PBXContainerItemProxy */;
+		};
+		E31216FC2CD94E2E9E8D225F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 58EEB1056DCA46F1B3D1DEC8 /* WeatherMatWidgets */;
+			targetProxy = 55FA32EA030241FA9B944983 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -718,6 +825,25 @@
 			};
 			name = Debug;
 		};
+		83688317445F453694C7A194 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 4;
+				INFOPLIST_FILE = WeatherMatWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = de.praxishartlep.weathermat.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		922FE4BE98510BF7C90EF57D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -779,6 +905,25 @@
 			};
 			name = Release;
 		};
+		C32860148DB84C2EB9710C03 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 4;
+				INFOPLIST_FILE = WeatherMatWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = de.praxishartlep.weathermat.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		D1BF231F2A834D007639AE31 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -834,6 +979,15 @@
 			buildConfigurations = (
 				70D1DB4DCB8DD5BC79DE8D78 /* Debug */,
 				37060EFA581AAF8CCDBA7160 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E340DAA57726408DBA7AD78B /* Build configuration list for PBXNativeTarget "WeatherMatWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C32860148DB84C2EB9710C03 /* Debug */,
+				83688317445F453694C7A194 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

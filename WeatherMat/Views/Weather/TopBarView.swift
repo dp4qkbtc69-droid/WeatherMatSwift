@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TopBarView: View {
     @Environment(WeatherViewModel.self) private var vm
+    @Environment(LocationStore.self) private var locationStore
     @Binding var showLocations: Bool
     var sidebarToggle: (() -> Void)? = nil
     let openRainRadar: () -> Void
@@ -14,11 +15,11 @@ struct TopBarView: View {
             // ── Centre: location name ────────────────────────────────────
             VStack(spacing: 6) {
                 HStack(spacing: 6) {
-                    if vm.activeLocation?.isGPS == true {
+                    if locationStore.activeLocation?.isGPS == true {
                         Image(systemName: "location.fill")
                             .font(.footnote)
                     }
-                    Text(vm.activeLocation?.name ?? "—")
+                    Text(locationStore.activeLocation?.name ?? "—")
                         .font(.system(.title3, weight: .semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
@@ -28,14 +29,14 @@ struct TopBarView: View {
                 .frame(maxWidth: 188)
 
                 // Pager dots
-                if vm.savedLocations.count > 1 {
+                if locationStore.savedLocations.count > 1 {
                     HStack(spacing: 5) {
-                        ForEach(vm.savedLocations.indices, id: \.self) { i in
+                        ForEach(locationStore.savedLocations.indices, id: \.self) { i in
                             Circle()
-                                .fill(i == vm.activeLocationIndex ? Color.white : Color.white.opacity(0.35))
-                                .frame(width: i == vm.activeLocationIndex ? 8 : 6,
-                                       height: i == vm.activeLocationIndex ? 8 : 6)
-                                .animation(.easeInOut(duration: 0.2), value: vm.activeLocationIndex)
+                                .fill(i == locationStore.activeLocationIndex ? Color.white : Color.white.opacity(0.35))
+                                .frame(width: i == locationStore.activeLocationIndex ? 8 : 6,
+                                       height: i == locationStore.activeLocationIndex ? 8 : 6)
+                                .animation(.easeInOut(duration: 0.2), value: locationStore.activeLocationIndex)
                         }
                     }
                 }

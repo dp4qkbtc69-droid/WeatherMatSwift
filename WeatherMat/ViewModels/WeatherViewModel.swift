@@ -19,6 +19,12 @@ enum WeatherLoadError {
     }
 }
 
+/// Loads, caches, and refreshes weather data for the active location.
+/// Location state/CRUD/GPS acquisition lives in `LocationStore` (injected);
+/// this view model reacts to location changes — restoring the cache,
+/// loading fresh data, pre-warming radar via `RadarPrewarmController` — as
+/// thin orchestration, rather than owning those sub-features' logic itself.
+@MainActor
 @Observable
 final class WeatherViewModel {
 
@@ -34,20 +40,15 @@ final class WeatherViewModel {
     var where2GoRadiusKm: Int = 150
     var isLoadingWhere2Go = false
     var where2GoError: String?
+    var selectedDayIndex: Int? = nil
 
-    // MARK: - Location state
-    var savedLocations:        [SavedLocation] = []
-    var activeLocationIndex:   Int             = 0
-    var selectedDayIndex:      Int?            = nil
-
-    // MARK: - Services
-    private let geocoding = GeocodingService.shared
+    // MARK: - Dependencies
+    private let locationStore: LocationStore
+    private let ensembleService: EnsembleServiceProtocol
     private let where2Go = Where2GoService.shared
 
     // MARK: - Constants
     private let refreshCooldown: TimeInterval = 600
-    private let udKey = "savedLocations_v1"
-    private let activeLocationIndexKey = "activeLocationIndex_v1"
 
     /// Per-location refresh timestamps — populated from persisted cache on init/switch
     private var lastRefreshByLocation: [UUID: Date] = [:]
@@ -56,33 +57,18 @@ final class WeatherViewModel {
     private var lastWhere2GoRequest: Where2GoRequest?
     private var where2GoRefreshTask: Task<Void, Never>?
 
-    // MARK: - Cache wrapper (stores fetchedAt alongside weather data)
-    private struct CachedEntry: Codable {
-        let data:      EnsembleWeatherData
-        let fetchedAt: Date
-    }
-
-    private func cacheKey(for loc: SavedLocation) -> String {
-        "weatherCache_\(loc.id.uuidString)"
-    }
-
     // MARK: - Init
-    init() {
-        let ud = UserDefaults.standard
-        if let data = ud.data(forKey: udKey),
-           let locs  = try? JSONDecoder().decode([SavedLocation].self, from: data) {
-            savedLocations = locs.sorted { $0.sortOrder < $1.sortOrder }
-        }
-        if !savedLocations.isEmpty {
-            let storedIndex = ud.integer(forKey: activeLocationIndexKey)
-            activeLocationIndex = min(max(0, storedIndex), savedLocations.count - 1)
-        }
+    init(locationStore: LocationStore, ensembleService: EnsembleServiceProtocol = EnsembleService.shared) {
+        self.locationStore = locationStore
+        self.ensembleService = ensembleService
         // Restore cached weather + fetchedAt for the active location — no spinner on relaunch
-        restoreCache(for: activeLocationIndex)
+        if let loc = locationStore.activeLocation {
+            restoreCache(for: loc)
+        }
     }
 
     // MARK: - Computed
-    var activeLocation: SavedLocation? { savedLocations[safe: activeLocationIndex] }
+    var activeLocation: SavedLocation? { locationStore.activeLocation }
 
     var selectedDay: DailyEntry? {
         guard let i = selectedDayIndex else { return nil }
@@ -114,20 +100,15 @@ final class WeatherViewModel {
     }
 
     // MARK: - Cache helpers
-    private func restoreCache(for index: Int) {
-        guard let loc  = savedLocations[safe: index],
-              let data  = UserDefaults.standard.data(forKey: cacheKey(for: loc)),
-              let entry = try? JSONDecoder().decode(CachedEntry.self, from: data)
-        else { return }
+    private func restoreCache(for loc: SavedLocation) {
+        guard let entry = WeatherCacheStore.load(for: loc.id) else { return }
         weatherData = entry.data
         lastRefreshByLocation[loc.id] = entry.fetchedAt
     }
 
     private func saveCache(_ result: EnsembleWeatherData, fetchedAt: Date, for loc: SavedLocation) {
         lastRefreshByLocation[loc.id] = fetchedAt
-        if let encoded = try? JSONEncoder().encode(CachedEntry(data: result, fetchedAt: fetchedAt)) {
-            UserDefaults.standard.set(encoded, forKey: cacheKey(for: loc))
-        }
+        WeatherCacheStore.save(result, fetchedAt: fetchedAt, for: loc.id)
     }
 
     // MARK: - Load weather
@@ -147,8 +128,8 @@ final class WeatherViewModel {
         }
 
         let clLoc  = CLLocation(latitude: loc.latitude, longitude: loc.longitude)
-        let result: EnsembleWeatherData? = await withTaskTimeout(seconds: 25) {
-            await EnsembleService.shared.fetch(for: clLoc)
+        let result: EnsembleWeatherData? = await withTaskTimeout(seconds: 25) { [ensembleService] in
+            await ensembleService.fetch(for: clLoc)
         }
 
         guard let result else {
@@ -173,6 +154,8 @@ final class WeatherViewModel {
                 weatherData = result
                 NotificationService.shared.pruneSeenIDs(keepingFrom: result.warnings)
                 await NotificationService.shared.checkWarnings(result.warnings)
+                await LiveActivityController.updateRain(result.rain, locationName: loc.name)
+                await LiveActivityController.updateWarning(result.warnings, locationName: loc.name)
                 loadWhere2GoIfNeeded()
             }
         }
@@ -198,16 +181,6 @@ final class WeatherViewModel {
     // MARK: - Foreground refresh + radar prewarm
     private let foregroundRefreshCooldown: TimeInterval = 120
     private var lastForegroundRefresh: Date?
-    private let lastWarmedRadarKey = "lastWarmedRadarLocation_v1"
-    private let lastWarmedRadarAtKey = "lastWarmedRadarAt_v1"
-    private let lastWarmedAllKey = "lastWarmedAllLocations_v1"
-    private let lastWarmedAllAtKey = "lastWarmedAllLocationsAt_v1"
-    /// Re-warm the same location after this long even if it didn't move: the
-    /// server keeps dynamic hotspots only in memory, so a proxy restart (deploy,
-    /// monthly rebuild, OOM) drops them. Re-warming on a long-absence return
-    /// reheats the server hotspot *and* the app's QUIC connection before the
-    /// first tile batch.
-    private let radarWarmCooldown: TimeInterval = 15 * 60
 
     /// Called when the app becomes active (cold start and foreground return):
     /// re-acquires the current GPS position (same "always show here" policy
@@ -220,8 +193,8 @@ final class WeatherViewModel {
         guard let loc = activeLocation else { return }
         // Retried here too (not just on save) since WCSession activation is
         // async and may not be ready yet at cold launch.
-        WatchConnectivityService.shared.syncLocations(savedLocations)
-        prewarmRadarIfNeeded(for: loc)
+        WatchConnectivityService.shared.syncLocations(locationStore.savedLocations)
+        RadarPrewarmController.prewarmIfNeeded(for: loc)
         if let last = lastForegroundRefresh,
            Date().timeIntervalSince(last) < foregroundRefreshCooldown {
             return
@@ -230,132 +203,45 @@ final class WeatherViewModel {
         await useGPSLocation(makeActive: true)
     }
 
-    /// Asks the radar proxy to render this location's tiles ahead of the user
-    /// opening the radar. Re-triggers when the active location changed (~1 km
-    /// granularity) *or* when the last warm is older than `radarWarmCooldown`,
-    /// so a returning user after a long absence re-primes the server hotspot and
-    /// the network connection instead of hitting cold tiles.
-    @MainActor
-    func prewarmRadarIfNeeded(for loc: SavedLocation) {
-        let coord = String(format: "%.2f,%.2f", loc.latitude, loc.longitude)
-        let defaults = UserDefaults.standard
-        let sameCoord = defaults.string(forKey: lastWarmedRadarKey) == coord
-        let lastAt = defaults.object(forKey: lastWarmedRadarAtKey) as? Date
-        let fresh = lastAt.map { Date().timeIntervalSince($0) < radarWarmCooldown } ?? false
-        guard !(sameCoord && fresh) else { return }
-        let warmedRadarKey = lastWarmedRadarKey
-        let warmedRadarAtKey = lastWarmedRadarAtKey
-        Task.detached(priority: .utility) {
-            let warmed = await RainRadarService.warmLocation(latitude: loc.latitude, longitude: loc.longitude)
-            guard warmed else { return }
-            await MainActor.run {
-                UserDefaults.standard.set(coord, forKey: warmedRadarKey)
-                UserDefaults.standard.set(Date(), forKey: warmedRadarAtKey)
-            }
-        }
-    }
+    // MARK: - Location actions
+    // Thin orchestration over `LocationStore`: these call into the store for
+    // the actual state change, then react on the weather side (cache
+    // restore/reset, reload, radar prewarm) — `LocationStore` itself knows
+    // nothing about weather data or radar.
 
-    /// Registers every saved location with the proxy so each one opens the
-    /// radar from cache. Re-registers when the set changed or the cooldown
-    /// elapsed (proxy keeps hotspots only in memory + a persisted file).
-    @MainActor
-    func warmAllSavedLocations() {
-        let coords = savedLocations.map { (latitude: $0.latitude, longitude: $0.longitude) }
-        guard !coords.isEmpty else { return }
-        let signature = coords
-            .map { String(format: "%.2f,%.2f", $0.latitude, $0.longitude) }
-            .joined(separator: ";")
-        let defaults = UserDefaults.standard
-        let sameSet = defaults.string(forKey: lastWarmedAllKey) == signature
-        let lastAt = defaults.object(forKey: lastWarmedAllAtKey) as? Date
-        let fresh = lastAt.map { Date().timeIntervalSince($0) < radarWarmCooldown } ?? false
-        guard !(sameSet && fresh) else { return }
-        let warmedAllKey = lastWarmedAllKey
-        let warmedAllAtKey = lastWarmedAllAtKey
-        Task.detached(priority: .utility) {
-            let warmed = await RainRadarService.registerWarmLocations(coords)
-            guard warmed else { return }
-            await MainActor.run {
-                UserDefaults.standard.set(signature, forKey: warmedAllKey)
-                UserDefaults.standard.set(Date(), forKey: warmedAllAtKey)
-            }
-        }
-    }
-
-    // MARK: - Location management
     @MainActor
     func addLocation(_ loc: SavedLocation) {
-        savedLocations.append(loc)
-        normalizeLocationSortOrder()
-        activeLocationIndex = savedLocations.count - 1
-        selectedDayIndex    = nil
-        saveLocations()
-        saveActiveLocationIndex()
-        warmAllSavedLocations()
+        locationStore.addLocation(loc)
+        selectedDayIndex = nil
+        RadarPrewarmController.warmAll(locationStore.savedLocations)
         Task { await loadWeather(for: loc, force: true) }
     }
 
     @MainActor
     func removeLocation(at index: Int) {
-        guard savedLocations.indices.contains(index) else { return }
-        let removed = savedLocations[index]
-        UserDefaults.standard.removeObject(forKey: cacheKey(for: removed))
+        guard let removed = locationStore.removeLocation(at: index) else { return }
+        WeatherCacheStore.remove(for: removed.id)
         lastRefreshByLocation.removeValue(forKey: removed.id)
-
-        savedLocations.remove(at: index)
-        activeLocationIndex = min(activeLocationIndex, max(0, savedLocations.count - 1))
-        selectedDayIndex    = nil
-        normalizeLocationSortOrder()
-        saveLocations()
-        saveActiveLocationIndex()
-        warmAllSavedLocations()
+        selectedDayIndex = nil
+        RadarPrewarmController.warmAll(locationStore.savedLocations)
         if let loc = activeLocation { Task { await loadWeather(for: loc) } }
     }
 
     @MainActor
-    func moveLocations(from source: IndexSet, to destination: Int) {
-        let activeID = activeLocation?.id
-        guard !source.contains(where: { savedLocations[safe: $0]?.isGPS == true }) else { return }
-        var reordered = savedLocations
-        let moving = source.sorted().map { reordered[$0] }
-        for index in source.sorted(by: >) {
-            reordered.remove(at: index)
-        }
-        let adjustedDestination = destination - source.filter { $0 < destination }.count
-        reordered.insert(contentsOf: moving, at: adjustedDestination)
-        if let gpsIndex = reordered.firstIndex(where: { $0.isGPS }) {
-            let gpsLocation = reordered.remove(at: gpsIndex)
-            reordered.insert(gpsLocation, at: 0)
-        }
-        savedLocations = reordered
-        normalizeLocationSortOrder()
-        if let activeID, let newIndex = savedLocations.firstIndex(where: { $0.id == activeID }) {
-            activeLocationIndex = newIndex
-        } else {
-            activeLocationIndex = min(activeLocationIndex, max(0, savedLocations.count - 1))
-        }
-        saveLocations()
-        saveActiveLocationIndex()
-    }
-
-    @MainActor
     func switchLocation(to index: Int) {
-        guard savedLocations.indices.contains(index) else { return }
-        activeLocationIndex = index
-        selectedDayIndex    = nil
-        saveActiveLocationIndex()
+        locationStore.switchLocation(to: index)
+        selectedDayIndex = nil
 
         // Restore cached data instantly — no blank state during background refresh
         weatherData = nil
-        restoreCache(for: index)
+        guard let loc = activeLocation else { return }
+        restoreCache(for: loc)
 
-        if let loc = savedLocations[safe: index] {
-            where2GoSpots = []
-            where2GoError = nil
-            lastWhere2GoRequest = nil
-            prewarmRadarIfNeeded(for: loc)
-            Task { await loadWeather(for: loc) }
-        }
+        where2GoSpots = []
+        where2GoError = nil
+        lastWhere2GoRequest = nil
+        RadarPrewarmController.prewarmIfNeeded(for: loc)
+        Task { await loadWeather(for: loc) }
     }
 
     // MARK: - Day selection
@@ -364,18 +250,13 @@ final class WeatherViewModel {
     }
 
     // MARK: - GPS
-    /// Prevents concurrent GPS flows (e.g. layout switch re-firing .task)
-    private var isRequestingGPS = false
-    /// Skip a fresh GPS fix if the last one is younger than this
-    private let gpsCooldown: TimeInterval = 120
-    private var lastGPSFix: Date?
 
     /// Called on app launch: always shows the current GPS location, so the
     /// app opens on today's weather where the user actually is rather than
     /// whichever saved city was last open.
     @MainActor
     func refreshOnLaunch() async {
-        warmAllSavedLocations()
+        RadarPrewarmController.warmAll(locationStore.savedLocations)
         await useGPSLocation(makeActive: true)
     }
 
@@ -384,77 +265,29 @@ final class WeatherViewModel {
     /// background), so launching the app keeps the last-shown location.
     @MainActor
     func useGPSLocation(makeActive: Bool = true) async {
-        guard !isRequestingGPS else { return }
-        let previousActiveID = activeLocation?.id
-
-        // Recent fix available — just refresh weather, no GPS hardware
-        if let last = lastGPSFix,
-           Date().timeIntervalSince(last) < gpsCooldown,
-           let gpsIndex = savedLocations.firstIndex(where: { $0.isGPS }) {
-            if makeActive {
-                activeLocationIndex = gpsIndex
-                saveActiveLocationIndex()
-            }
-            if let loc = activeLocation { await loadWeather(for: loc) }
+        switch locationStore.gpsQuickCheck(makeActive: makeActive) {
+        case .busy:
             return
+        case .usesCachedFix(let loc):
+            await loadWeather(for: loc)
+            return
+        case .needsFreshFix:
+            break
         }
-
-        isRequestingGPS = true
-        defer { isRequestingGPS = false }
 
         // Only show the global spinner when GPS is actually taking over the
         // view; keeping the current location must not blank it out.
         if makeActive { isLoading = true }
-        do {
-            let clLoc = try await withTimeout(seconds: 10) {
-                try await LocationService.shared.requestCurrentLocation()
+        switch await locationStore.acquireFreshGPSLocation(makeActive: makeActive) {
+        case .success(let location, let replacedLocationID, let shouldResetDaySelection):
+            if let replacedLocationID {
+                WeatherCacheStore.remove(for: replacedLocationID)
+                lastRefreshByLocation.removeValue(forKey: replacedLocationID)
             }
-            let name = await geocoding.reverseGeocode(clLoc)
-
-            // Clean up old GPS cache entry before replacing with new UUID
-            let oldGPSIndex = savedLocations.firstIndex(where: { $0.isGPS })
-            if let oldGPSIndex {
-                let oldGPS = savedLocations[oldGPSIndex]
-                UserDefaults.standard.removeObject(forKey: cacheKey(for: oldGPS))
-                lastRefreshByLocation.removeValue(forKey: oldGPS.id)
-            }
-
-            let saved = SavedLocation(
-                name:      name,
-                latitude:  clLoc.coordinate.latitude,
-                longitude: clLoc.coordinate.longitude,
-                sortOrder: 0,
-                isGPS:     true
-            )
-            if let oldGPSIndex {
-                savedLocations.remove(at: oldGPSIndex)
-                savedLocations.insert(saved, at: 0)
-            } else {
-                savedLocations.insert(saved, at: 0)
-            }
-            lastGPSFix = Date()
-            saveLocations()
-            warmAllSavedLocations()
-
-            // Restore focus: GPS when taking over, otherwise the previously
-            // shown location (its index may have shifted from the insert).
-            if makeActive {
-                activeLocationIndex = 0
-                selectedDayIndex    = nil
-            } else if let previousActiveID,
-                      let idx = savedLocations.firstIndex(where: { $0.id == previousActiveID }) {
-                activeLocationIndex = idx
-            } else {
-                activeLocationIndex = 0
-                selectedDayIndex    = nil
-            }
-            saveActiveLocationIndex()
-
-            if let active = activeLocation {
-                prewarmRadarIfNeeded(for: active)
-                await loadWeather(for: active, force: true)
-            }
-        } catch {
+            if shouldResetDaySelection { selectedDayIndex = nil }
+            RadarPrewarmController.prewarmIfNeeded(for: location)
+            await loadWeather(for: location, force: true)
+        case .failure:
             if makeActive { isLoading = false }
             if let loc = activeLocation {
                 await loadWeather(for: loc)
@@ -465,35 +298,23 @@ final class WeatherViewModel {
     }
 
     // MARK: - Swipe between locations
-    @MainActor func swipeNext() { if activeLocationIndex < savedLocations.count - 1 { switchLocation(to: activeLocationIndex + 1) } }
-    @MainActor func swipePrev() { if activeLocationIndex > 0                          { switchLocation(to: activeLocationIndex - 1) } }
-
-    // MARK: - Persistence
-    func saveLocations() {
-        if let data = try? JSONEncoder().encode(savedLocations) {
-            UserDefaults.standard.set(data, forKey: udKey)
+    @MainActor func swipeNext() {
+        if locationStore.activeLocationIndex < locationStore.savedLocations.count - 1 {
+            switchLocation(to: locationStore.activeLocationIndex + 1)
         }
-        WatchConnectivityService.shared.syncLocations(savedLocations)
-        // Keep the warning-push registration in sync with the saved locations.
-        Task { @MainActor in
-            await PushRegistrationService.shared.syncRegistration()
+    }
+    @MainActor func swipePrev() {
+        if locationStore.activeLocationIndex > 0 {
+            switchLocation(to: locationStore.activeLocationIndex - 1)
         }
     }
 
-    private func normalizeLocationSortOrder() {
-        for i in savedLocations.indices {
-            savedLocations[i].sortOrder = i
-        }
-    }
-
-    private func saveActiveLocationIndex() {
-        UserDefaults.standard.set(activeLocationIndex, forKey: activeLocationIndexKey)
-    }
+    // MARK: - Weather cache / calibration
 
     @MainActor
     func clearWeatherCache() {
-        for loc in savedLocations {
-            UserDefaults.standard.removeObject(forKey: cacheKey(for: loc))
+        for loc in locationStore.savedLocations {
+            WeatherCacheStore.remove(for: loc.id)
         }
         lastRefreshByLocation.removeAll()
         weatherData = nil
@@ -521,6 +342,8 @@ final class WeatherViewModel {
         let lon = (loc.longitude * 10).rounded() / 10
         return String(format: "%.1f,%.1f", lat, lon)
     }
+
+    // MARK: - Where2Go
 
     @MainActor
     func loadWhere2GoIfNeeded() {
