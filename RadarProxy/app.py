@@ -23,6 +23,7 @@ from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Tuple
 import xml.etree.ElementTree as ET
 
+import h5py
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi import Path as ApiPath
@@ -37,9 +38,12 @@ logging.basicConfig(
 logger = logging.getLogger("radar-proxy")
 
 
+# DWD retired the legacy RADOLAN-binary RV composite (DE1200_RV_LATEST.tar.bz2)
+# in favor of ODIM_H5 (composite_rv_LATEST.tar, plain tar of per-step HDF5
+# files) in late 2025 — see _parse_frame/_radar_intensity_from_odim_grid.
 DWD_RV_URL = os.environ.get(
     "DWD_RV_URL",
-    "https://opendata.dwd.de/weather/radar/composite/rv/DE1200_RV_LATEST.tar.bz2",
+    "https://opendata.dwd.de/weather/radar/composite/rv/composite_rv_LATEST.tar",
 )
 DWD_RV_INDEX_URL = os.environ.get(
     "DWD_RV_INDEX_URL",
@@ -2058,7 +2062,7 @@ def _download_archive(url: str) -> bytes:
 
 def _extract_frames(archive: bytes) -> List[RadarFrame]:
     frames: List[RadarFrame] = []
-    with tarfile.open(fileobj=io.BytesIO(bz2.decompress(archive)), mode="r:") as tar:
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
         for member in sorted(tar.getmembers(), key=lambda item: item.name):
             if not member.isfile():
                 continue
@@ -2086,7 +2090,7 @@ def _recent_archive_urls(reference: datetime) -> List[str]:
     lower_bound = reference - timedelta(hours=PAST_HOURS)
     selected: List[Tuple[datetime, str]] = []
     for href in parser.links:
-        if not href.startswith("DE1200_RV") or not href.endswith(".tar.bz2") or "LATEST" in href:
+        if not href.startswith("composite_rv_") or not href.endswith(".tar") or "LATEST" in href:
             continue
         stamp = _archive_time_from_name(href)
         if stamp is None:
@@ -2106,10 +2110,13 @@ def _recent_archive_urls(reference: datetime) -> List[str]:
 
 
 def _archive_time_from_name(name: str) -> datetime | None:
+    # e.g. "composite_rv_20261031_0910.tar" -> 2026-10-31 09:10 UTC.
+    parts = name.removesuffix(".tar").split("_")
+    if len(parts) < 4:
+        return None
     try:
-        stamp = name.split("_")[1][2:12]
-        return datetime.strptime(stamp, "%y%m%d%H%M").replace(tzinfo=timezone.utc)
-    except (IndexError, ValueError):
+        return datetime.strptime(f"{parts[2]}{parts[3]}", "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+    except ValueError:
         return None
 
 
@@ -2140,58 +2147,71 @@ class _IconRawLinkParser(HTMLParser):
 
 
 def _parse_frame(name: str, raw: bytes) -> RadarFrame | None:
+    time_value, offset = _rv_time_from_member_name(name)
+    if time_value is None:
+        return None
     try:
-        header_end = raw.index(b"\x03") + 1
-    except ValueError:
+        with h5py.File(io.BytesIO(raw), "r") as h5:
+            grid = h5["dataset1/data1/data"][()]
+            what = h5["dataset1/data1/what"].attrs
+            gain = float(what["gain"])
+            quant_offset = float(what["offset"])
+            nodata = float(what["nodata"]) if "nodata" in what else None
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        logger.warning("failed to decode RV member %s: %s", name, error)
         return None
 
-    payload = raw[header_end:]
-    expected = GRID_WIDTH * GRID_HEIGHT * 2
-    if len(payload) < expected:
-        return None
-
-    grid = np.frombuffer(payload[:expected], dtype="<u2").reshape((GRID_HEIGHT, GRID_WIDTH))
-    intensity, valid = _radar_intensity_from_grid(grid)
+    intensity, valid = _radar_intensity_from_odim_grid(grid, gain, quant_offset, nodata)
     image = _render_radar_image_from_intensity(intensity, valid)
-    time_value, is_forecast = _time_from_name(name)
-    return RadarFrame(frame_id=name, time=time_value, is_forecast=is_forecast, image=image, rain=intensity)
+    return RadarFrame(frame_id=name, time=time_value, is_forecast=offset > 0, image=image, rain=intensity)
 
 
-def _time_from_name(name: str) -> Tuple[datetime, bool]:
-    # Example: DE1200_RV2606290300_045
+def _rv_time_from_member_name(name: str) -> Tuple[datetime | None, int]:
+    # Example: "composite_rv_20261031_0910_000-hd5" -> base 2026-10-31 09:10
+    # UTC (the archive's reference instant), offset 0 min. DWD's RV product
+    # is 1 observation + 24 five-minute nowcast steps ahead of it, so this
+    # same base appears on every member of one archive with offset 0..120.
     parts = name.split("_")
-    stamp = parts[1][2:] if len(parts) >= 2 and parts[1].startswith("RV") else "7001010000"
-    offset = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
-    base = datetime.strptime(stamp, "%y%m%d%H%M").replace(tzinfo=timezone.utc)
-    return base + timedelta(minutes=offset), offset > 0
+    if len(parts) < 5:
+        return None, 0
+    offset_digits = parts[4].split("-", 1)[0]
+    try:
+        base = datetime.strptime(f"{parts[2]}{parts[3]}", "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+        offset = int(offset_digits)
+    except ValueError:
+        return None, 0
+    return base + timedelta(minutes=offset), offset
 
 
 def _is_native_timeline_frame(frame: RadarFrame) -> bool:
     if NATIVE_FRAME_STEP_MINUTES <= 5:
         return True
-    parts = frame.frame_id.split("_")
-    try:
-        offset = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
-    except (IndexError, ValueError):
-        return True
+    _, offset = _rv_time_from_member_name(frame.frame_id)
     return offset % NATIVE_FRAME_STEP_MINUTES == 0
 
 
-def _render_radar_image(grid: np.ndarray) -> Image.Image:
-    intensity, valid = _radar_intensity_from_grid(grid)
-    return _render_radar_image_from_intensity(intensity, valid)
+# DWD's RV composite moved from a legacy RADOLAN binary format to ODIM_H5
+# (HDF5) in late 2025. Each tar member is now a self-contained HDF5 file
+# holding a 5-minute-accumulated-precipitation grid (`dataset1/data1/data`,
+# ODIM quantity "ACRR") instead of the old ASCII-header + raw uint16 payload.
+# `gain`/`offset` (read per-file, not hardcoded) convert the raw integer grid
+# to that 5-minute accumulation in mm; multiplying by 12 converts it to the
+# hourly rate (mm/h) the rest of this module — palette thresholds,
+# region-pack quantization — already assumes, matching the RV product's
+# documented 5-minute step. Verified against a live file: ~27ms to decode,
+# and resulting rates (dry-weather max ~30mm/h in an isolated cell) are in a
+# physically sane range for a mostly-dry pass.
+RV_ACCUMULATION_TO_HOURLY_RATE = 12.0
 
 
-def _radar_intensity_from_grid(grid: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    raw_values = grid.astype(np.uint16)
-    values = raw_values & np.uint16(0x0FFF)
-
-    positive = values[values > 0]
-    nodata_value = int(np.bincount(positive).argmax()) if positive.size else -1
-    valid = (values > 0) & (values != nodata_value) & (values < 4090)
-
-    intensity = np.zeros_like(values, dtype=np.float32)
-    intensity[valid] = values[valid].astype(np.float32) / 10.0
+def _radar_intensity_from_odim_grid(
+    grid: np.ndarray, gain: float, offset: float, nodata: float | None
+) -> Tuple[np.ndarray, np.ndarray]:
+    raw = grid.astype(np.float64)
+    valid = np.ones(raw.shape, dtype=bool) if nodata is None else raw != nodata
+    accumulated_mm = raw * gain + offset
+    intensity = np.clip(accumulated_mm * RV_ACCUMULATION_TO_HOURLY_RATE, 0.0, None).astype(np.float32)
+    intensity[~valid] = 0.0
     return intensity, valid
 
 

@@ -1,5 +1,6 @@
 fastapi==0.115.6
 eccodes>=2.36,<3
+h5py==3.14.0
 numpy==2.0.2
 pillow==11.0.0
 uvicorn[standard]==0.34.0

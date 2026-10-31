@@ -121,6 +121,32 @@ class PaletteSyncTests(unittest.TestCase):
 
 
 class RadarCoreTests(unittest.TestCase):
+    def test_parse_frame_decodes_a_real_odim_h5_rv_member(self) -> None:
+        # Regression guard for DWD's late-2025 RV format migration (legacy
+        # RADOLAN binary -> ODIM_H5): decodes an actual DWD tar member saved
+        # as a fixture, so a future format drift fails loudly here instead
+        # of silently freezing the live cache again (see
+        # RV_ACCUMULATION_TO_HOURLY_RATE's comment for how this was found).
+        fixture_path = os.path.join(os.path.dirname(__file__), "testdata", "sample_rv_member.hd5")
+        with open(fixture_path, "rb") as handle:
+            raw = handle.read()
+
+        frame = app._parse_frame("composite_rv_20261031_0910_120-hd5", raw)
+
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame.time, datetime(2026, 10, 31, 11, 10, tzinfo=timezone.utc))
+        self.assertTrue(frame.is_forecast)
+        self.assertEqual(frame.rain.shape, (app.GRID_HEIGHT, app.GRID_WIDTH))
+        # Known-good values for this exact fixture (computed independently
+        # from the file's own gain/offset/nodata attributes) — a wrong
+        # scale factor (e.g. missing the accumulation->rate *12, or reusing
+        # the legacy /10 RADOLAN scale) would miss this badly.
+        self.assertAlmostEqual(float(frame.rain.max()), 10.33, delta=0.1)
+        self.assertGreater(int((frame.rain > 0).sum()), 0)
+
+    def test_parse_frame_rejects_an_unparseable_member_name(self) -> None:
+        self.assertIsNone(app._parse_frame("not-a-recognized-name", b"irrelevant"))
+
     def test_precipitation_type_uses_wet_area_fraction(self) -> None:
         intensity = np.array([[0.10, 0.20], [0.30, 0.40]])
 
@@ -380,19 +406,19 @@ class RadarCoreTests(unittest.TestCase):
     def test_dwd_rv_forecast_frames_keep_distinct_cache_and_pack_keys(self) -> None:
         rain_a = np.ones((app.GRID_HEIGHT, app.GRID_WIDTH), dtype=np.float32)
         rain_b = np.full((app.GRID_HEIGHT, app.GRID_WIDTH), 2.0, dtype=np.float32)
-        time_a, forecast_a = app._time_from_name("DE1200_RV2607051310_010")
-        time_b, forecast_b = app._time_from_name("DE1200_RV2607051310_030")
+        time_a, offset_a = app._rv_time_from_member_name("composite_rv_20260705_1310_010-hd5")
+        time_b, offset_b = app._rv_time_from_member_name("composite_rv_20260705_1310_030-hd5")
         frame_a = app.RadarFrame(
-            frame_id="DE1200_RV2607051310_010",
+            frame_id="composite_rv_20260705_1310_010-hd5",
             time=time_a,
-            is_forecast=forecast_a,
+            is_forecast=offset_a > 0,
             image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
             rain=rain_a,
         )
         frame_b = app.RadarFrame(
-            frame_id="DE1200_RV2607051310_030",
+            frame_id="composite_rv_20260705_1310_030-hd5",
             time=time_b,
-            is_forecast=forecast_b,
+            is_forecast=offset_b > 0,
             image=Image.new("RGBA", (1, 1), (0, 0, 0, 0)),
             rain=rain_b,
         )
@@ -418,7 +444,7 @@ class RadarCoreTests(unittest.TestCase):
         header = json.loads(header_raw.decode("utf-8"))
         self.assertEqual(
             [frame["id"] for frame in header["frames"]],
-            ["DE1200_RV2607051310_010", "DE1200_RV2607051310_030"],
+            ["composite_rv_20260705_1310_010-hd5", "composite_rv_20260705_1310_030-hd5"],
         )
 
     def test_icon_handoff_blends_only_inside_window(self) -> None:
