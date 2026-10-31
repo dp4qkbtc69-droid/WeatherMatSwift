@@ -36,12 +36,16 @@ enum LiveActivityController {
             return
         }
 
+        let estimate = rainEventEstimate(for: rain)
         let state = RainRadarActivityAttributes.ContentState(
             statusText: rain.text,
             subText: rain.sub,
             sfSymbol: rain.sfSymbol,
             minutesUntilRain: rain.minutesUntilRain,
             minutesUntilClear: rain.minutesUntilClear,
+            rainIntensity: RainIntensity(rawValue: rain.severity.rawValue),
+            estimatedDurationMinutes: estimate?.durationMinutes,
+            progress: estimate?.progress,
             updatedAt: Date()
         )
         let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(35 * 60))
@@ -58,6 +62,56 @@ enum LiveActivityController {
         guard let activity = rainActivity else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
         rainActivity = nil
+    }
+
+    /// How long the current/imminent rain is expected to last and, while
+    /// it's still approaching, how close it is — derived purely from
+    /// `RainAnalysis.chart` (already computed by `analyzeRain`, no new
+    /// data source or persisted state). Pure/stateless and `nonisolated`
+    /// so it's directly unit-testable.
+    ///
+    /// `chart` only looks forward from "now" (`EnsembleService.rainChart`),
+    /// so there's no way to know how long an already-ongoing (`.now`) event
+    /// has been running — `progress` stays `nil` there rather than faking a
+    /// number; `durationMinutes` instead reads as "how much longer".
+    // `now` is a parameter (not read internally) so the same instant used to
+    // build `rain.chart` can be passed straight through in tests — calling
+    // `Date()` again a few ms later here previously caused real, if tiny,
+    // clock drift that flipped the truncated minute count by one.
+    nonisolated static func rainEventEstimate(for rain: RainAnalysis, now: Date = Date()) -> (durationMinutes: Int, progress: Double?)? {
+        switch rain.type {
+        case .soon:
+            guard let minutesUntilRain = rain.minutesUntilRain, minutesUntilRain > 0 else { return nil }
+            let eventStart = now.addingTimeInterval(Double(minutesUntilRain) * 60)
+            guard let durationMinutes = minutesUntilClear(in: rain.chart, from: eventStart) else { return nil }
+            // Countdown fill: 0 at the edge of analyzeRain's own "soon"
+            // lookahead window, 1 right as it starts.
+            let progress = min(1, max(0, 1 - Double(minutesUntilRain) / soonLookaheadMinutes))
+            return (durationMinutes, progress)
+        case .now:
+            guard let durationMinutes = minutesUntilClear(in: rain.chart, from: now) else { return nil }
+            return (durationMinutes, nil)
+        default:
+            return nil
+        }
+    }
+
+    // Matches the 2h lookahead `EnsembleService.analyzeRain` itself searches
+    // within for an upcoming event — keep in sync if that window changes.
+    // `nonisolated`: a plain constant, and `rainEventEstimate` (which reads
+    // it) needs to stay nonisolated to be callable from non-MainActor tests.
+    private nonisolated static let soonLookaheadMinutes: Double = 120
+
+    // Thresholds mirror `EnsembleService.analyzeRain`'s own "rain stopping"
+    // check — intentionally duplicated rather than shared, so this stays
+    // dependency-free of EnsembleService's private helpers.
+    private nonisolated static func minutesUntilClear(in chart: [RainChartPoint], from start: Date) -> Int? {
+        guard let startIndex = chart.firstIndex(where: { $0.time >= start }) else { return nil }
+        let end = chart[startIndex...]
+            .first { $0.precipitationRate < 0.08 && $0.probability < 40 }?.time
+            ?? chart.last?.time
+        guard let end, end > start else { return nil }
+        return max(1, Int(end.timeIntervalSince(start) / 60))
     }
 
     // MARK: - Weather warnings

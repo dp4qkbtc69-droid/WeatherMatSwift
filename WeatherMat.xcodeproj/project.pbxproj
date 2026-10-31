@@ -14,6 +14,7 @@
 		1E24A5AA3BA4B4B802E15309 /* EnsembleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B470F12426BB9567B938E302 /* EnsembleLogicTests.swift */; };
 		F6549FC20A1B80A8FF868781 /* ServiceDependencyInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */; };
 		27FF0F08EE7E2BD3E974F0A6 /* WeatherCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */; };
+		8FBF2EABAE857B19E7B8989A /* LiveActivityControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A975DB1B0C2FFA019E4507 /* LiveActivityControllerTests.swift */; };
 		206B856EAEFCFF82DA21494F /* WatchWeatherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FECA4B5C2E336F3BF03D7D85 /* WatchWeatherViewModel.swift */; };
 		3454EA341C34508AFA6FC94D /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D816A840CA115017249F019 /* CoreLocation.framework */; };
 		3587BB562E549B4FDA0B575F /* WeatherMatWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1955EEFD6D61223911DCE83 /* WeatherMatWatchApp.swift */; };
@@ -139,6 +140,7 @@
 		6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherMatTests.swift; sourceTree = "<group>"; };
 		7230FFB21350FC0035CA7B74 /* ServiceDependencyInjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceDependencyInjectionTests.swift; sourceTree = "<group>"; };
 		712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherCacheStoreTests.swift; sourceTree = "<group>"; };
+		C9A975DB1B0C2FFA019E4507 /* LiveActivityControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityControllerTests.swift; sourceTree = "<group>"; };
 		7382D5D6B32A911786C1EB1C /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
 		745D35260B3A5713055E5C54 /* WeatherMatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WeatherMatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D816A840CA115017249F019 /* CoreLocation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreLocation.framework; path = System/Library/Frameworks/CoreLocation.framework; sourceTree = SDKROOT; };
@@ -334,6 +336,7 @@
 				90B641CF24AC0C0C89D5285C /* WeatherMatSwiftTesting.swift */,
 				6A056DF6E237E47D71EA46CF /* WeatherMatTests.swift */,
 				712A02CBA71B407E079E0F52 /* WeatherCacheStoreTests.swift */,
+				C9A975DB1B0C2FFA019E4507 /* LiveActivityControllerTests.swift */,
 			);
 			path = WeatherMatTests;
 			sourceTree = "<group>";
@@ -553,6 +556,7 @@
 				51CE192F1411A60730AF21FA /* WeatherMatSwiftTesting.swift in Sources */,
 				1D63D26BB8AA66A3A17ABE36 /* WeatherMatTests.swift in Sources */,
 				27FF0F08EE7E2BD3E974F0A6 /* WeatherCacheStoreTests.swift in Sources */,
+				8FBF2EABAE857B19E7B8989A /* LiveActivityControllerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
